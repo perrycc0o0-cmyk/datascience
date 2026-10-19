@@ -1,0 +1,10 @@
+sample,condition,filtered_h5,raw_h5
+Con1,WD,data/Con1/filtered_feature_bc_matrix.h5,data/Con1/raw_feature_bc_matrix.h5
+Con2,WD,data/Con2/filtered_feature_bc_matrix.h5,data/Con2/raw_feature_bc_matrix.h5
+Con3,WD,data/Con3/filtered_feature_bc_matrix.h5,data/Con3/raw_feature_bc_matrix.h5
+Ext1,Ext,data/Ext1/filtered_feature_bc_matrix.h5,data/Ext1/raw_feature_bc_matrix.h5
+Ext2,Ext,data/Ext2/filtered_feature_bc_matrix.h5,data/Ext2/raw_feature_bc_matrix.h5
+Ext3,Ext,data/Ext3/filtered_feature_bc_matrix.h5,data/Ext3/raw_feature_bc_matrix.h5
+Ret_ext1,Ret-Ext,data/Ret_ext1/filtered_feature_bc_matrix.h5,data/Ret_ext1/raw_feature_bc_matrix.h5
+Ret_ext2,Ret-Ext,data/Ret_ext2/filtered_feature_bc_matrix.h5,data/Ret_ext2/raw_feature_bc_matrix.h5
+Ret_ext3,Ret-Ext,data/Ret_ext3/filtered_feature_bc_matrix.h5,data/Ret_ext3/raw_feature_bc_matrix.h5

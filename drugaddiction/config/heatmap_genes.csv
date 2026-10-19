@@ -1,0 +1,45 @@
+gene_order,module_id,module,gene
+1,M1,Secretory/dense-core vesicle signaling,Ece1
+2,M1,Secretory/dense-core vesicle signaling,Kif1a
+3,M1,Secretory/dense-core vesicle signaling,Ptprn
+4,M1,Secretory/dense-core vesicle signaling,Scg2
+5,M2,Activity-dependent transcription,Per1
+6,M2,Activity-dependent transcription,Pmepa1
+7,M2,Activity-dependent transcription,Kdm6b
+8,M2,Activity-dependent transcription,Nr4a3
+9,M3,Synaptic adhesion/circuit remodeling,Robo1
+10,M3,Synaptic adhesion/circuit remodeling,Sema5a
+11,M3,Synaptic adhesion/circuit remodeling,Nrp1
+12,M3,Synaptic adhesion/circuit remodeling,Efna5
+13,M3,Synaptic adhesion/circuit remodeling,Ntrk2
+14,M3,Synaptic adhesion/circuit remodeling,Reln
+15,M3,Synaptic adhesion/circuit remodeling,Lrrtm3
+16,M3,Synaptic adhesion/circuit remodeling,Clstn2
+17,M3,Synaptic adhesion/circuit remodeling,Opcml
+18,M3,Synaptic adhesion/circuit remodeling,Mdga2
+19,M3,Synaptic adhesion/circuit remodeling,Cdh2
+20,M4,Endocannabinoid-linked neuromodulation,Cntnap4
+21,M4,Endocannabinoid-linked neuromodulation,Braf
+22,M4,Endocannabinoid-linked neuromodulation,Pde1a
+23,M4,Endocannabinoid-linked neuromodulation,Pde3b
+24,M4,Endocannabinoid-linked neuromodulation,Mapk8
+25,M4,Endocannabinoid-linked neuromodulation,Rims1
+26,M4,Endocannabinoid-linked neuromodulation,Gnaq
+27,M5,Drug-evoked glutamatergic/GABAergic plasticity,Mapk1
+28,M5,Drug-evoked glutamatergic/GABAergic plasticity,Mapk10
+29,M5,Drug-evoked glutamatergic/GABAergic plasticity,Itpr1
+30,M5,Drug-evoked glutamatergic/GABAergic plasticity,Gabra5
+31,M5,Drug-evoked glutamatergic/GABAergic plasticity,Gabrb1
+32,M5,Drug-evoked glutamatergic/GABAergic plasticity,Grm3
+33,M5,Drug-evoked glutamatergic/GABAergic plasticity,Grm8
+34,M5,Drug-evoked glutamatergic/GABAergic plasticity,Grik3
+35,M5,Drug-evoked glutamatergic/GABAergic plasticity,Grin2b
+36,M6,Addiction-associated cAMP signaling,Gnai1
+37,M6,Addiction-associated cAMP signaling,Gng12
+38,M6,Addiction-associated cAMP signaling,Adora1
+39,M6,Addiction-associated cAMP signaling,Kcnj6
+40,M6,Addiction-associated cAMP signaling,Pde4d
+41,M6,Addiction-associated cAMP signaling,Adcy1
+42,M6,Addiction-associated cAMP signaling,Adcy3
+43,M6,Addiction-associated cAMP signaling,Adcy9
+44,M6,Addiction-associated cAMP signaling,Adcy5

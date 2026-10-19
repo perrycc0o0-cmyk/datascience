@@ -1,0 +1,38 @@
+{
+  "seed": 42,
+  "paths": {
+    "samples": "config/samples.csv",
+    "output": "results",
+    "major_annotations": "config/major_annotations.csv",
+    "subtype_annotations": "config/subtype_annotations.csv",
+    "orthologs": "config/rat_human_orthologs.tsv",
+    "heatmap_genes": "config/heatmap_genes.csv"
+  },
+  "qc": {
+    "initial_min_cells": 3, "initial_min_features": 300,
+    "genes_min": 700, "genes_max": 5000, "umi_min": 500, "umi_max": 30000,
+    "mt_max": 5, "mt_pattern": "^Mt-", "ribo_pattern": "^Rp[sl]", "complexity_min": 0.75
+  },
+  "ambient": {"version": "1.6.2", "precluster_resolution": 0.5, "force_accept": false, "round_to_integer": true},
+  "doublet": {"version": "1.24.10", "clusters": false, "dbr_per_1000": 0.004},
+  "global": {
+    "scale_factor": 10000, "hvg": 2000, "pcs": 50, "pc_cap": 30,
+    "vars_to_regress": ["nCount_RNA", "percent.mt"],
+    "harmony_group": "sample", "neighbors_k": 20,
+    "resolutions": [0.1, 0.2, 0.4, 0.6, 0.8, 1.0], "resolution": 1.0,
+    "umap_neighbors": 30, "umap_min_dist": 0.3, "umap_metric": "cosine"
+  },
+  "neurons": {
+    "hvg": 2000, "pcs": 100, "harmony_pcs": 30, "graph_dims": 19, "resolution": 0.5,
+    "Excitatory": {"k": 20, "umap_neighbors": 10, "umap_min_dist": 0.8, "umap_spread": 6, "umap_repulsion": 1},
+    "Inhibitory": {"k": 30}
+  },
+  "markers": {"min_pct": 0.25, "logfc_threshold": 0.25, "max_cells_per_ident": 1000},
+  "ieg": {"genes": ["Arc", "Bdnf", "Btg2", "Fos", "Fosl2", "Homer1", "Npas4", "Nr4a1"], "quantile": 0.95, "quantile_type": 7},
+  "de": {"design": "~ condition", "min_total_counts": 10, "min_samples": 3, "padj": 0.05, "fold_change": 1.15},
+  "programs": {"min_pct": 0.1, "logfc_threshold": 0, "top_genes": 500, "control_genes": 100, "nbin": 24},
+  "ora": {"padj": 0.05, "pvalue_cutoff": 0.05, "qvalue_cutoff": 0.2, "min_gs_size": 5, "max_gs_size": 500},
+  "glmm": {"family": "binomial", "link": "logit", "fixed_effect": "condition", "random_intercept": "sample", "nAGQ": 1, "optimizer": "bobyqa", "p_method": "Wald_z", "adjust": "BH"},
+  "cellchat": {"raw_use": true, "population_size": true, "min_cells": 10, "database": "human", "ortholog_policy": "one_to_one", "probability_type": "triMean"},
+  "plot": {"font": "Arial", "base_size": 14, "dpi": 600, "volcano_width": 9, "volcano_height": 7}
+}

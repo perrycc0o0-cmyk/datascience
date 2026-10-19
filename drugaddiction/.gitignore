@@ -1,0 +1,10 @@
+results/
+data/
+*.rds
+*.h5
+*.h5ad
+*.png
+*.pdf
+.Rhistory
+.RData
+renv/library/
