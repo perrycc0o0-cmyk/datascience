@@ -19,7 +19,8 @@ drugaddiction/
 │   ├── subtype_annotations.csv     神经元 cluster 到亚群的映射
 │   ├── markers.json                细胞类别与神经元亚群 marker
 │   ├── rat_human_orthologs.tsv     CellChat 使用的一对一同源基因表
-│   └── heatmap_genes.csv           六模块热图的基因与顺序
+│   ├── heatmap_genes.csv           六模块热图的基因与顺序
+│   └── enrichment_terms.csv        通路可视化的名称匹配规则
 ├── R/                             数据处理、统计和作图辅助函数
 ├── scripts/                       01–12 分析、作图及注释应用脚本
 │   └── README.md                  逐脚本说明与详细参数
@@ -57,7 +58,7 @@ sample,condition,filtered_h5,raw_h5
 Con1,WD,data/Con1/filtered_feature_bc_matrix.h5,data/Con1/raw_feature_bc_matrix.h5
 ```
 
-`sample` 必须唯一；`condition` 使用 `WD`、`Ext`、`Ret-Ext`。每个条件需要 3 行。`filtered_h5` 为 cell-called 10x matrix，`raw_h5` 为同一文库包含空液滴的 raw matrix，二者的 feature 和 barcode 必须对应。路径相对于项目工作目录，也可以填写绝对路径。输入 feature 名使用大鼠 gene symbols。
+`sample` 必须唯一；`condition` 使用 `WD`、`Ext`、`Ret-Ext`。每个条件需要 3 行。配置中的 `Con1–Con3` 对应稿件的 `WD1–WD3`，`Ret_ext1–Ret_ext3` 对应稿件的 `Ret–Ext1–Ret–Ext3`；这些是同一文库的文件标识与展示名称，不是额外样本。`filtered_h5` 为 cell-called 10x matrix，`raw_h5` 为同一文库包含空液滴的 raw matrix，二者的 feature 和 barcode 必须对应。路径相对于项目工作目录，也可以填写绝对路径。输入 feature 名使用大鼠 gene symbols。
 
 ### 2. 主要细胞类别映射
 
@@ -152,4 +153,4 @@ Rscript scripts/12_plot_communication_proportions.R --config config/analysis.jso
 | `11_plot_expression.R` | DEG 火山图、富集图、评分及固定六模块热图 | Fig. 3、Fig. S7 表达和通路图 |
 | `12_plot_communication_proportions.R` | 亚群比例、GLMM显著性、通信网络及通路图 | Fig. 3L、Fig. S8B、Fig. S9 及通信图 |
 
-逐脚本的输入、输出、参数与统计含义见 [`scripts/README.md`](scripts/README.md)。这些脚本对应 Fig. 3 的计算分析部分（B–D、F–L、P）及相关补充图；Fig. 3M–O 的湿实验不属于本代码流程。`config/analysis.json` 是分析参数入口。CellChat 输出为基于表达数据的推断性通信，不等同于直接测得的神经投射或连接强度。
+逐脚本的输入、输出、参数与统计含义见 [`scripts/README.md`](scripts/README.md)。稿件未逐项展开的计算设置集中列在该文档的“实现参数汇总”中，包括 SoupX 预聚类、DESeq2 预过滤与拟合设置、GLMM 检验及优化参数、同源映射策略和绘图筛选规则。这些脚本对应 Fig. 3 的计算分析部分（B–D、F–L、P）及相关补充图；Fig. 3M–O 的湿实验不属于本代码流程。`config/analysis.json` 是分析参数入口。CellChat 输出为基于表达数据的推断性通信，不等同于直接测得的神经投射或连接强度。

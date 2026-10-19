@@ -60,15 +60,48 @@ major层级在步骤02之后应用，生成`02_annotation/annotated.rds`；subty
 | `04_ieg_definition.R` | Exc／Inh各自95%分位数定义IEG-high | Fig. 3E及后续IEG-high分析的数据基础 |
 | `05_pseudobulk_DE.R` | sample层面DESeq2差异表达 | Fig. 3H、I及Fig. S7火山图的数据基础 |
 | `06_marker_program_scores.R` | 两套marker-program基因集及核级评分 | Fig. 3F、G及对应补充评分 |
-| `07_GO_KEGG_enrichment.R` | 上／下调基因GO和KEGG富集 | Fig. 3J、Fig. S7F及其他条件富集 |
+| `07_GO_KEGG_enrichment.R` | 上／下调基因GO和KEGG富集 | Fig. 3J及其他条件／类别富集 |
 | `08_subtype_GLMM.R` | condition固定效应＋sample随机截距二项模型 | Fig. 3L、Fig. S8B |
 | `09_CellChat_analysis.R` | IEG-high神经元推断通信与输出汇总 | CellChat相关主图及Fig. S9的数据基础 |
 | `10_plot_cell_types.R` | 大类、QC、亚群UMAP与marker图 | Fig. 3B–D、Fig. S6A–J |
-| `11_plot_expression.R` | 评分、火山图、模块热图与富集 | Fig. 3F–J、Fig. S7A–F |
+| `11_plot_expression.R` | 评分、火山图、模块热图与富集 | Fig. 3F–J、Fig. S7A–C及独立结果图 |
 | `12_plot_communication_proportions.R` | 组成、GLMM比例与通信汇总图 | Fig. 3K、L、P，Fig. S8A、B，Fig. S9A–E |
 | `apply_annotations.R` | 将确认后的cluster映射应用到已有对象 | 大类和亚群注释，不重新计算降维或聚类 |
 
 Fig. 3A的实验设计示意和M–O的湿实验图像／动物级结果不由这些snRNA-seq脚本生成。
+
+## 实现参数汇总
+
+下表汇总 Methods 未逐项展开、但脚本中需要明确的计算设置；详细输入输出和完整参数见后续各节。它们是程序的实现配置，不是额外的生物学分组或预设结果。
+
+| 分析步骤 | 具体实现设置 |
+|---|---|
+| 文库 QC 与 SoupX | QC 指标基于初始 Seurat 过滤后的、未经污染校正的 observed counts；SoupX 在这些初始 called nuclei 上估计污染，再将已记录的固定 QC 掩码应用于校正矩阵。预聚类使用 LogNormalize 10,000、2,000 HVG、最多 30 PCs、resolution 0.5；该 resolution 不替代最终大类聚类的 1.0。 |
+| 全局整合 | PC 选择使用标准差百分比的两个候选判据，具体公式见步骤02；不是标准差平方的方差百分比。图邻居数 k=20；resolution 列表为 0.1、0.2、0.4、0.6、0.8、1.0；Harmony `project.dim=FALSE`。cluster marker 只导出正向 marker，检验仍为双侧 Wilcoxon。 |
+| 神经元亚群 | Harmony 输入最多 30 PCs，随后建图和 UMAP 取前 19 个可用 Harmony 维度；子集 ScaleData 不重复回归 UMI／线粒体比例。 |
+| IEG-high | 分位数使用 R `quantile(type=7)`，纳入 `score >= cutoff` 的并列值；使用八基因面板中实际可用的基因，并输出可用性记录。 |
+| DESeq2 | 总 counts≥10 且至少3个 sample 的 counts>0；九个文库共同拟合 `~ condition`；Wald、parametric dispersion、ratio size factors、独立过滤开启、自动 outlier 替换关闭，保留默认 Cook's distance 处理。 |
+| Marker-program | Exc／Inh 合并后，在每个条件内分别比较 IEG-high／low 来获得两套共同 signature；Seurat `min.pct=0.1`、`logfc.threshold=0`。评分在 All／Exc／Inh 三个 scope 内分别进行，`nbin=24`、`ctrl=100`、seed=42；分布检验使用双侧非配对 Wilcoxon 正态近似及连续性校正。 |
+| GO／KEGG | 背景限于通过 DE counts 预过滤并可映射到相应注释库的基因；`maxGSSize=500`；GO BP、CC、MF 分别分析；一对多 Entrez 映射保留并去重。KEGG 使用运行时在线数据库，并保存 gene–pathway 对应表。 |
+| 二项 GLMM | Ext 为参照；lme4 `glmer`、`nAGQ=1`、`optimizer=bobyqa`、双侧 Wald z 检验、OR 与 Wald 95% CI；singular 容差1e-4。模型失败或不收敛时 P 为 NA，BH 计划检验数分别固定为6与8。sample 随机截距方差完整估计，不另设权重。 |
+| CellChat | 真实一对一 rat–human 映射；`triMean` 概率估计；All／Exc／Inh 各自分析 Overall、WD、Ext、Ret–Ext。跨亚群 outgoing 排除 self-edge，自分泌量另存；Ext 基线为0时相对变化为 NA。 |
+| 可视化 | Arial、基础字号14、PNG 600 dpi 及 Cairo PDF；火山图最多标注20基因，相关富集通路每方向最多12条，通信通路图最多20项。具体排序、颜色和画布尺寸见步骤10–12及绘图辅助函数。 |
+
+### 数据与统计口径
+
+- `RNA/counts` 为 SoupX 校正后、尚未归一化的整数 UMI counts，DESeq2 对其按 sample 求和；`observed/counts` 为保留的未污染校正 counts。两者都不是 Harmony 坐标或 scaled expression；“未归一化”不等于“未经 SoupX 校正”。
+- 富集前景为 DE BH-adjusted P≤0.05 加变化方向，不额外使用火山图的1.15倍幅度阈值。完整 term 表保留全部返回条目；`*_significant.csv` 遵循 clusterProfiler 的 P／adjusted P／q-value 过滤，绘图从完整表按真实 adjusted P≤0.05 及名称匹配选择。因此作图条目与 `*_significant.csv` 可能不完全相同，不能互相替代表格定义。
+- 核级评分图的星号来自原始 Wilcoxon P；DESeq2、富集与 GLMM 分别使用各自的 BH-adjusted P；signature 发现和 Seurat cluster marker 表中的 `p_val_adj` 是 Seurat 的 Bonferroni 结果。不同校正类型不能仅因列名相近而互换。
+- 热图先计算 Ext／Ret–Ext 的条件均值，再按基因对两个均值做 Z 标准化。只有两列时，非恒定基因的两个 Z 值为 ±1/√2，因此颜色主要显示方向，不能用于比较不同基因的效应幅度；原始条件均值另表保存。
+- 代码使用 `Con1–Con3` 作为 WD 文库的文件标识，使用 `Ret_ext1–Ret_ext3` 作为 Ret–Ext 文库标识；分别对应稿件的 WD1–WD3 与 Ret–Ext1–Ret–Ext3，不改变9个文库的实验设计。
+- 核数、IEG-high cutoff、DEG 数量、P 值和通信百分比均由实际输入计算，不作为程序必须达到的目标值。
+
+### 图表范围
+
+通信的 `All` scope 按主稿 Methods 定义，包含全部已注释 Exc 与 Inh 亚群；`Excitatory` scope 只包含 Exc 亚群。旧补充图注中的 `CrossType` 若意指指定的亚群子集，则与这里的 `All` 不是相同输入范围，不能只替换名称。比例图的统计读取步骤08的 GLMM＋BH；湿实验动物级 t 检验不属于该比例模型。
+
+指定补充稿的 Fig. S7 图注明确列出 A–C 三个火山图；脚本同时保留其余条件／类别的火山图和富集图，作为独立结果文件，不在文件名或脚本中预先分配补充子图编号。
+
 
 ## 01 — `01_preprocess_libraries.R`
 
@@ -184,7 +217,7 @@ Inh亚群marker：GABA_Amb—Slc17a6；GABA_Etv1—Etv1；GABA_Lamp5—Lamp5；G
 
 ### 目的和输入
 
-读取步骤04的两类对象，仅使用IEG-high核。将RNA counts在每个神经元大类内按sample求和，形成gene×9个pooled samples的整数矩阵。每个sample必须实际包含该类IEG-high核；不会用全零列伪造缺失的重复。
+读取步骤04的两类对象，仅使用IEG-high核。将RNA assay中SoupX校正后、未归一化的整数UMI counts在每个神经元大类内按sample求和，形成gene×9个pooled samples的整数矩阵。每个sample必须实际包含该类IEG-high核；不会用全零列伪造缺失的重复。
 
 ### 模型和参数
 
@@ -342,16 +375,16 @@ BH按分析类型分别校正，Fig. 3L对应的Exc组成分析计划检验6个�
 | Fig. S7A | Inh Ret–Ext vs Ext火山图 |
 | Fig. S7B | Exc Ext vs WD火山图 |
 | Fig. S7C | Exc Ret–Ext vs WD火山图 |
-| Fig. S7D | Inh Ext vs WD火山图 |
-| Fig. S7E | Inh Ret–Ext vs WD火山图 |
+| 独立结果 | Inh Ext vs WD火山图 |
+| 独立结果 | Inh Ret–Ext vs WD火山图 |
 
 火山图x轴为log2FoldChange，y轴为真实`-log10(padj)`；水平虚线为padj=0.05，垂直虚线为±log2(1.15)。只绘制有限FC和非缺失padj。颜色按FC连续变化，范围[-2,2]，超界截断；点大小范围0.7–3.2，alpha=0.72。最多标注20个满足padj和FC双阈值的基因，依padj、绝对FC、基因名排序；标签Arial italic、size=4.5，repel seed=42。默认画布9×7英寸。
 
 ### 评分、热图与富集
 
-- Fig. 3F／G：Exc scope的Ret–Ext／Ext marker-program分布。仅Ext、Ret–Ext，violin为`trim = FALSE`、alpha=0.8，叠加width=0.12的boxplot；双侧核级Wilcoxon原始P转换为星号；画布5×6英寸。All和Inh scope同样写入`scores/`，文件名以scope区分。
+- Fig. 3F／G：Exc scope的Ret–Ext／Ext marker-program分布。仅Ext、Ret–Ext，violin为`trim = FALSE`、alpha=0.8，叠加width=0.12的boxplot；中心线为中位数，箱体为IQR，须采用默认1.5×IQR规则，不是单纯的IQR误差线。双侧核级Wilcoxon原始P转换为星号；画布5×6英寸。All和Inh scope同样写入`scores/`，文件名以scope区分。
 - Fig. 3I：读取配置的44个候选基因及六个功能模块；仅保留在Exc Ret–Ext vs Ext中padj≤0.05且对象内存在的基因，输出membership表。分别在两条件的Exc IEG-high核上计算平均log-normalized表达，再对每基因的这两个均值按行进行Z标准化；零方差记为0。按`gene_order`固定排序、按module分面；画布宽9，高为`max(5, 基因数×0.22)`。该步骤是固定功能分组展示，不进行新的模块发现。
-- Fig. 3J、Fig. S7F：分别为Exc／Inh Ret–Ext vs Ext富集显示；其他条件另存`Other_enrichment/`。仅选真实padj≤0.05且名称匹配`config/enrichment_terms.csv`的通路；每个方向最多12条。默认关键词包括addiction、synapse、neuron、neurotransmitter、endocannabinoid、glutamate、GABA、dopamine、cAMP、axon、dendrite、plasticity、vesicle、secretory、learning和memory。关键词仅决定显示，不改变富集检验或P值。横轴为带Up／Down方向的`-log10(padj)`，点大小为Count、颜色为padj、形状为数据库。画布宽11，高为`max(5, 2 + 0.32×通路数)`。
+- Fig. 3J对应Exc Ret–Ext vs Ext富集显示；Inh及其他条件富集另存独立结果，均位于`enrichment/`，按神经元类别和contrast命名。仅选真实padj≤0.05且名称匹配`config/enrichment_terms.csv`的通路；每个方向最多12条。默认关键词包括addiction、synapse、neuron、neurotransmitter、endocannabinoid、glutamate、GABA、dopamine、cAMP、axon、dendrite、plasticity、vesicle、secretory、learning和memory。关键词仅决定显示，不改变富集检验或P值。横轴为带Up／Down方向的`-log10(padj)`，点大小为Count、颜色为padj、形状为数据库。画布宽11，高为`max(5, 2 + 0.32×通路数)`。
 
 输出目录 `11_expression_figures/`，按`volcano/`、`enrichment/`、`scores/`和`heatmap/`组织，文件名使用神经元类别、contrast和program等分析信息，不含论文图号。除PNG／PDF外，另保存富集plot data、热图membership和表达长表。无符合标准的基因或通路时输出说明空图，不使用原始P替代padj。
 
@@ -397,7 +430,7 @@ BH按分析类型分别校正，Fig. 3L对应的Exc组成分析计划检验6个�
 
 提供HDF5读取、版本要求、PC选择、sample Harmony、注释映射和marker诊断图工具。SoupX及scDblFinder版本严格按配置匹配；HDF5使用gene symbols、唯一feature名称。PC数不超过核数−1及高变基因数−1。
 
-`run_sample_harmony()`固定`group.by.vars = sample`、`reduction.use = pca`、`assay.use = RNA`、`project.dim = FALSE`、`reduction.save = harmony`。`annotation_mapping()`拒绝重复cluster和不属于该对象的cluster；未填写项为Unknown，不自动归入相邻类型。
+`run_sample_harmony()`固定`group.by.vars = sample`、`reduction.use = pca`、`project.dim = FALSE`、`reduction.save = harmony`，输入为RNA流程计算的PCA嵌入。`annotation_mapping()`拒绝重复cluster和不属于该对象的cluster；未填写项为Unknown，不自动归入相邻类型。
 
 本文件同时提供六大类和6个Exc／8个Inh的marker panel。诊断DotPlot为dot.scale=10、按基因scale，颜色lightgrey／blue／red；画布宽`max(10, marker数×0.45)`、高7。marker FeaturePlot为UMAP、point size=0.3、`order = TRUE`、min.cutoff=q10、max.cutoff=q90，画布8×7。该诊断显示与`R/plotting.R`的论文汇总显示分别设置，不改变表达矩阵或分群。
 
