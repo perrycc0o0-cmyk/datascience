@@ -6,7 +6,7 @@ Analysis and figure-generation code for single-nucleus RNA sequencing of the rat
 
 The study includes three conditions: WD, Ext, and Ret–Ext. Each condition has three independent pooled biological samples, each comprising IL tissue from five rats. One sequencing library represents each pooled sample, giving nine libraries in total. The biological replicate number is **n = 3 per condition**; nuclei within a library are not independent animal replicates.
 
-Harmony uses `sample` as the batch variable, not experimental condition. Differential expression uses unnormalized integer UMI counts from the RNA assay, aggregated by sample and analyzed with DESeq2. Marker-program scores retain nucleus-level distributions. Proportion models include condition as a fixed effect and sample as a random intercept.
+Harmony uses `sample` as the batch variable, not experimental condition. Differential expression uses unnormalized integer UMI counts from the RNA assay, aggregated by sample and analyzed with DESeq2. Marker-program scores retain nucleus-level distributions. Their two-sided Wilcoxon P values are BH-adjusted across the two programs within each analysis scope (All, Excitatory, or Inhibitory); the two comparisons in Fig. 3F/G form one Excitatory correction family. Proportion models include condition as a fixed effect and sample as a random intercept.
 
 ## Directory structure
 
@@ -149,7 +149,7 @@ Annotation templates and marker results support manual review; scripts do not fi
 | `apply_annotations.R` | Apply reviewed cell-class or subtype mappings | Cell identity annotation |
 | `04_ieg_definition.R` | Eight-gene expression sum and class-specific 95th percentile | IEG-high definition, thresholds, distributions |
 | `05_pseudobulk_DE.R` | Sample-by-neuronal-class/IEG-class counts, DESeq2, BH | Condition-dependent expression in Fig. 3 and Fig. S7 |
-| `06_marker_program_scores.R` | IEG-high signatures and nucleus-level scores | Fig. 3F/G score distributions |
+| `06_marker_program_scores.R` | IEG-high signatures, nucleus-level scores, Wilcoxon tests, and within-scope BH adjustment | Fig. 3F/G score distributions |
 | `07_GO_KEGG_enrichment.R` | Direction-specific GO/KEGG enrichment and backgrounds | Fig. 3 pathways and related supplementary results |
 | `08_subtype_GLMM.R` | Binomial GLMM with condition fixed effect, sample random intercept, BH | Fig. 3L and Fig. S8B |
 | `09_CellChat_analysis.R` | One-to-one ortholog mapping and IEG-high subtype communication | Predicted communication in Fig. 3P and Fig. S9 |

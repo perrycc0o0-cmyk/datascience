@@ -25,6 +25,34 @@ scores <- read_csv_table(stage_path(ctx, '06_scores', 'scores_long.csv'))
 if (!all(c('scope', 'program', 'condition', 'score') %in% names(scores))) {
   stop('Score table requires scope, program, condition and score')
 }
+score_statistics <- read_csv_table(stage_path(ctx, '06_scores', 'score_statistics.csv'))
+required_statistics <- c('scope', 'program', 'pvalue', 'padj', 'p_adjust_method',
+                          'planned_tests', 'comparison_family')
+if (!all(required_statistics %in% names(score_statistics))) {
+  stop('Score statistics require BH-adjusted results from step 06')
+}
+if (anyNA(score_statistics[, c('scope', 'program', 'p_adjust_method', 'planned_tests',
+                               'comparison_family')]) ||
+    anyDuplicated(score_statistics[, c('scope', 'program')]) ||
+    any(score_statistics$p_adjust_method != 'BH') ||
+    any(score_statistics$planned_tests != 2L)) {
+  stop('Score statistics must contain unique comparisons with BH adjustment across two programs')
+}
+expected_programs <- c('Ext_IEGhigh_UP', 'RetExt_IEGhigh_UP')
+for (scope in unique(scores$scope)) {
+  family <- score_statistics[score_statistics$scope == scope, , drop = FALSE]
+  if (nrow(family) != length(expected_programs) ||
+      !setequal(family$program, expected_programs) ||
+      length(unique(family$comparison_family)) != 1L) {
+    stop('Incomplete marker-program correction family for scope: ', scope)
+  }
+}
+if (any(!is.na(score_statistics$padj) &
+        (!is.finite(score_statistics$padj) | score_statistics$padj < 0 |
+           score_statistics$padj > 1))) {
+  stop('Invalid BH-adjusted score P values')
+}
+write_table(score_statistics, file.path(dest, 'scores', 'score_statistics.csv'))
 for (scope in unique(scores$scope)) for (program in unique(scores$program)) {
   d <- scores[scores$scope == scope & scores$program == program &
                 scores$condition %in% c('Ext', 'Ret-Ext'), , drop = FALSE]
@@ -36,13 +64,13 @@ for (scope in unique(scores$scope)) for (program in unique(scores$program)) {
     scale_fill_manual(values = condition_colors) +
     labs(x = NULL, y = 'Marker-program score', title = paste(scope, program)) +
     paper_theme(ctx) + theme(legend.position = 'none')
-  x <- d$score[d$condition == 'Ext']; y <- d$score[d$condition == 'Ret-Ext']
-  if (length(x) && length(y)) {
-    test <- wilcox.test(x, y, alternative = 'two.sided', exact = FALSE)
-    span <- diff(range(d$score, finite = TRUE)); if (!is.finite(span) || span == 0) span <- 1
-    p <- p + annotate('text', x = 1.5, y = max(d$score, na.rm = TRUE) + .1 * span,
-                      label = stars(test$p.value), family = ctx$cfg$plot$font, size = 5)
-  }
+  statistic <- score_statistics[score_statistics$scope == scope &
+                                   score_statistics$program == program, , drop = FALSE]
+  if (nrow(statistic) != 1L) stop('A unique score comparison is required for ', scope, ' / ', program)
+  label <- if (is.na(statistic$padj)) 'NA' else stars(statistic$padj)
+  span <- diff(range(d$score, finite = TRUE)); if (!is.finite(span) || span == 0) span <- 1
+  p <- p + annotate('text', x = 1.5, y = max(d$score, na.rm = TRUE) + .1 * span,
+                    label = label, family = ctx$cfg$plot$font, size = 5)
   base <- paste0('scores/', scope, '_', program)
   plot_export(p, file.path(dest, base), 5, 6, ctx$cfg$plot$dpi)
 }

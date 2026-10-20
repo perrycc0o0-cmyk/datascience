@@ -122,5 +122,21 @@ for (scope in names(scopes)) {
 }
 write_table(do.call(rbind, signature_summary), file.path(out, 'signature_summary.csv'))
 write_table(do.call(rbind, all_scores), file.path(out, 'scores_long.csv'))
-write_table(do.call(rbind, statistics), file.path(out, 'score_statistics.csv'))
+score_statistics <- do.call(rbind, statistics)
+rownames(score_statistics) <- NULL
+score_statistics$padj <- NA_real_
+score_statistics$p_adjust_method <- 'BH'
+score_statistics$planned_tests <- length(signatures)
+score_statistics$comparison_family <- paste0(score_statistics$scope, '_marker_programs_Ext_vs_RetExt')
+for (scope in names(scopes)) {
+  i <- score_statistics$scope == scope
+  if (sum(i) != length(signatures) ||
+      anyDuplicated(score_statistics$program[i]) ||
+      !setequal(score_statistics$program[i], names(signatures))) {
+    stop('Each scope must contain one comparison for each marker program')
+  }
+  score_statistics$padj[i] <- stats::p.adjust(score_statistics$pvalue[i], method = 'BH',
+                                              n = length(signatures))
+}
+write_table(score_statistics, file.path(out, 'score_statistics.csv'))
 write_session(file.path(out, 'sessionInfo.txt'))
