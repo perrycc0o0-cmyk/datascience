@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0",
+  "requested_on": "2026-11-01",
+  "source_files_read_only": true,
+  "naming_only_no_count_changes": true,
+  "cell_id_format": "<sample_id>__<original_10x_barcode>",
+  "canonical_conditions": ["WD", "Ext", "Ret-Ext"],
+  "sample_map": [
+    {"source_sample_id": "Con1", "sample_id": "WD1", "condition_label": "WD"},
+    {"source_sample_id": "Con2", "sample_id": "WD2", "condition_label": "WD"},
+    {"source_sample_id": "Con3", "sample_id": "WD3", "condition_label": "WD"},
+    {"source_sample_id": "Ext1", "sample_id": "Ext1", "condition_label": "Ext"},
+    {"source_sample_id": "Ext2", "sample_id": "Ext2", "condition_label": "Ext"},
+    {"source_sample_id": "Ext3", "sample_id": "Ext3", "condition_label": "Ext"},
+    {"source_sample_id": "Ret_ext1", "sample_id": "Ret-Ext1", "condition_label": "Ret-Ext"},
+    {"source_sample_id": "Ret_ext2", "sample_id": "Ret-Ext2", "condition_label": "Ret-Ext"},
+    {"source_sample_id": "Ret_ext3", "sample_id": "Ret-Ext3", "condition_label": "Ret-Ext"}
+  ]
+}

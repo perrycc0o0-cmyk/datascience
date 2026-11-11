@@ -1,0 +1,56 @@
+{
+  "run_id": "20261101_Manuscript_reanalysis_08",
+  "seed": 42,
+  "threads": 4,
+  "font": "Arial",
+  "backend": "R",
+  "formats": [
+    "png",
+    "pdf"
+  ],
+  "expected_counts": {
+    "all": 131480,
+    "Excitatory": 62991,
+    "Inhibitory": 21693,
+    "Inh_Etv1": 8139,
+    "Inh_Lamp5": 1085
+  },
+  "annotation": "User-approved six major classes, six Exc subtypes and eight Inh working groups; retain original uncertainty and lineage-conflict flags",
+  "conditions": [
+    "WD",
+    "Ext",
+    "Ret-Ext"
+  ],
+  "libraries_per_condition": 3,
+  "rats_per_library": 5,
+  "IEG_genes": [
+    "Arc",
+    "Bdnf",
+    "Btg2",
+    "Fos",
+    "Fosl2",
+    "Homer1",
+    "Npas4",
+    "Nr4a1"
+  ],
+  "IEG_quantile": 0.95,
+  "IEG_quantile_type": 7,
+  "IEG_comparison": ">=",
+  "IEG_scope": "within each neuron class across WD,Ext,Ret-Ext, using corrected RNA/data; retain ties",
+  "contrasts": {
+    "RetExt_vs_Ext": [
+      "Ret-Ext",
+      "Ext"
+    ],
+    "Ext_vs_WD": [
+      "Ext",
+      "WD"
+    ],
+    "RetExt_vs_WD": [
+      "Ret-Ext",
+      "WD"
+    ]
+  },
+  "base": null,
+  "upstream_stage2": "stage2"
+}

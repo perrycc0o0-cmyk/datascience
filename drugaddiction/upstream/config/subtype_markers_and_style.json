@@ -1,0 +1,119 @@
+{
+  "schema_version": "1.0",
+  "purpose": "Fresh neuronal subcluster marker review; existing label vocabulary without any historical numeric cluster mapping",
+  "reference_doi": "10.1038/s41467-024-50465-z",
+  "reference_notes_physical_pages": [54, 58, 59, 60],
+  "annotation_is_reference_label_transfer": false,
+  "annotation_is_probability": false,
+  "display_excluded_genes": ["Reln", "Slco1c1", "Slc30a3"],
+  "lineage_review_markers": ["Slc17a6", "Gad1", "Gad2", "Slc17a7", "Snap25"],
+  "review_colors": {"Unknown": "#6B7280"},
+  "lineages": {
+    "Exc": {
+      "name": "Excitatory",
+      "display_scheme": "B",
+      "order": ["GLU_L6_CLA", "GLU_L5_6", "GLU_L2_L3", "GLU_L5", "GLU_L4_5", "GLU_ADGM"],
+      "display_panels": {
+        "GLU_L6_CLA": ["Gng2", "Cck"],
+        "GLU_L5_6": ["Syt6", "Thsd7b"],
+        "GLU_L2_L3": ["Glis3", "Plk5"],
+        "GLU_L5": ["Parm1", "Trpc7"],
+        "GLU_L4_5": ["Il1rapl2", "Rorb"],
+        "GLU_ADGM": ["Rerg", "Arhgap6"]
+      },
+      "annotation_panels": {
+        "GLU_L6_CLA": {"genes": ["Synpr", "Nr4a2", "Gng2"], "use_for_identity_signature": true},
+        "GLU_L5_6": {"genes": ["Syt6", "Foxp2", "Tle4", "Thsd7b"], "use_for_identity_signature": true},
+        "GLU_L2_L3": {"genes": ["Glis3", "Rasgrf2", "Ccbe1", "Otof"], "use_for_identity_signature": true},
+        "GLU_L5": {"genes": ["Parm1", "Serpine2", "Bcl11b"], "use_for_identity_signature": true},
+        "GLU_L4_5": {"genes": ["Rorb", "Thsd7a", "Il1rapl2"], "use_for_identity_signature": true},
+        "GLU_ADGM": {"genes": ["Arhgap6", "Rerg", "Pkp2", "Rfx3"], "use_for_identity_signature": true}
+      },
+      "context_markers": {
+        "GLU_L6_CLA": ["Gng2", "Synpr", "Nr4a2", "Lxn"],
+        "GLU_L5_6": ["Syt6", "Foxp2", "Tle4", "Thsd7b", "Vwc2l", "Tshz2"],
+        "GLU_L2_L3": ["Glis3", "Otof", "Rasgrf2", "Ccbe1", "Cux2"],
+        "GLU_L5": ["Parm1", "Serpine2", "Bcl11b"],
+        "GLU_L4_5": ["Il1rapl2", "Rorb", "Thsd7a"],
+        "GLU_ADGM": ["Rerg", "Arhgap6", "Pkp2", "Rfx3"]
+      },
+      "colors": {
+        "GLU_L6_CLA": "#8DD3C7", "GLU_L5_6": "#FFFFB3", "GLU_L2_L3": "#BEBADA",
+        "GLU_L5": "#FB8072", "GLU_L4_5": "#80B1D3", "GLU_ADGM": "#FDB462", "Unknown": "#6B7280"
+      },
+      "scientific_cautions": [
+        "Cck, Plk5 and Trpc7 are descriptive display candidates, not independent identity anchors.",
+        "The L6/CLA-associated panel does not prove anatomical claustrum identity or a specific projection.",
+        "Vwc2l and Tshz2 describe an adjacent broad deep-layer program; the whole GLU_L5_6 label is not automatically corticothalamic.",
+        "Cux2 and Lxn are review context rather than additional author-curated primary identity seeds; missing or weak expression remains visible in source data."
+      ]
+    },
+    "Inh": {
+      "name": "Inhibitory",
+      "display_scheme": "A",
+      "order": ["GABA_Amb", "GABA_Etv1", "GABA_Lamp5", "GABA_MSN", "GABA_Sst", "GABA_Hs3st2", "GABA_Pvalb", "GABA_Vip"],
+      "display_panels": {
+        "GABA_Amb": ["Slc17a6"],
+        "GABA_Etv1": ["Etv1"],
+        "GABA_Lamp5": ["Lamp5", "Jam2"],
+        "GABA_MSN": ["Rgs9", "Rarb"],
+        "GABA_Sst": ["Sst"],
+        "GABA_Hs3st2": ["Hs3st2"],
+        "GABA_Pvalb": ["Pvalb", "Slit2"],
+        "GABA_Vip": ["Vip"]
+      },
+      "annotation_panels": {
+        "GABA_Amb": {"genes": ["Slc17a6", "Glra3"], "use_for_identity_signature": false},
+        "GABA_Etv1": {"genes": ["Etv1", "Pde3a", "Eya1", "Dpf3"], "use_for_identity_signature": true},
+        "GABA_Lamp5": {"genes": ["Jam2", "Lamp5", "Sv2c", "Reln"], "use_for_identity_signature": true},
+        "GABA_MSN": {"genes": ["Rgs9", "Rarb", "Gng7"], "use_for_identity_signature": true},
+        "GABA_Sst": {"genes": ["Sst", "Nos1", "Npy", "Chodl"], "use_for_identity_signature": true},
+        "GABA_Hs3st2": {"genes": ["Col5a2", "Hs3st2", "Vipr2"], "use_for_identity_signature": true},
+        "GABA_Pvalb": {"genes": ["Pvalb", "Slit2", "Eya4", "Esrrg", "Rspo2"], "use_for_identity_signature": true},
+        "GABA_Vip": {"genes": ["Vip"], "use_for_identity_signature": true}
+      },
+      "context_markers": {
+        "GABA_Amb": ["Slc17a6", "Glra3", "Gad1", "Gad2", "Slc17a7"],
+        "GABA_Etv1": ["Etv1", "Pde3a", "Eya1", "Dpf3"],
+        "GABA_Lamp5": ["Lamp5", "Reln", "Jam2", "Sv2c"],
+        "GABA_MSN": ["Gng7", "Rgs9", "Rarb", "Ppp1r1b", "Drd2"],
+        "GABA_Sst": ["Sst", "Nos1", "Npy", "Chodl", "Grik3", "Elfn1", "Lypd6"],
+        "GABA_Hs3st2": ["Hs3st2", "Col5a2", "Vipr2"],
+        "GABA_Pvalb": ["Pvalb", "Slit2", "Eya4", "Rspo2", "Esrrg"],
+        "GABA_Vip": ["Vip"]
+      },
+      "colors": {
+        "GABA_Amb": "#66C2A5", "GABA_Etv1": "#FC8D62", "GABA_Lamp5": "#8DA0CB", "GABA_MSN": "#E78AC3",
+        "GABA_Sst": "#A6D854", "GABA_Hs3st2": "#FFD92F", "GABA_Pvalb": "#E5C494", "GABA_Vip": "#FF6347", "Unknown": "#6B7280"
+      },
+      "scientific_cautions": [
+        "GABA_Amb is an unresolved display container; Slc17a6 is not proof of inhibitory identity and this panel does not compete as a validated signature.",
+        "Retain the original global cluster26 and lineage-conflict flags for explicit review after fresh subclustering.",
+        "Drd2 and Ppp1r1b support only part of the reference MSN program, not every MSN sourcecluster.",
+        "Grik3, Elfn1 and Lypd6 describe a neighboring Sst-associated reference program, not the full primary Sst program.",
+        "Slit2 alone does not independently prove Pvalb identity; Vip has no invented second exclusive author-curated marker.",
+        "Reln is omitted only from displayed panels, not removed from RNA or annotation evidence."
+      ]
+    }
+  },
+  "style": {
+    "backend": "R",
+    "font_family": "Arial", "png_dpi": 600,
+    "font_sizes": {"base": 8, "axis": 7.5, "title": 9, "legend": 6.5, "tag": 10},
+    "colors": ["#EEEEEE", "#E5E5E5", "#F4ACB8", "#DA304F", "#A60F2D"],
+    "color_knots": [-2.5, 0, 0.5, 1.5, 2.5], "color_limits": [-2.5, 2.5], "color_space": "Lab",
+    "point_area_mapping": "area proportional to percent expressed",
+    "max_group_point_mm": 6.5, "max_cluster_point_mm": 4,
+    "hide_below_detection_percent": 5, "size_limits": [0, 100], "size_breaks": [25, 50, 75],
+    "umap_label_mm": 2.6, "umap_raster_pointsize": 1.2, "umap_raster_pixels": 1200,
+    "umap_vector_point_mm": 0.09,
+    "numeric_cluster_ramp": ["#1E3A8A", "#DC2626", "#059669", "#7C2D12", "#6D28D9", "#0F766E", "#BE185D", "#374151", "#D97706", "#0369A1", "#4F46E5", "#A16207"],
+    "single_panels_untagged": true, "combined_tags": "uppercase"
+  },
+  "scientific_cautions": [
+    "The reference is a rat brain single-nucleus study, not a normal IL-specific truth set or executed label transfer.",
+    "Copy marker vocabulary and colors only; do not transfer historical numeric cluster assignments to fresh clusters.",
+    "Candidate annotation remains pending human review; retain Unknown when evidence is insufficient or conflicting.",
+    "Marker selection and clustering in the same data are descriptive, not independent anatomical or projection validation."
+  ]
+}

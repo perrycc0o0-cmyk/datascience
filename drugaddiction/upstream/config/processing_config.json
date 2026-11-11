@@ -1,0 +1,175 @@
+{
+  "schema_version": "1.0",
+  "run_id": "20261101_Manuscript_matched_stage1_01",
+  "stage_gate": "global_celltype_review",
+  "analysis_seed": 42,
+  "threads": 4,
+  "samples": [
+    {
+      "sample_id": "Con1",
+      "condition_label": "WD"
+    },
+    {
+      "sample_id": "Con2",
+      "condition_label": "WD"
+    },
+    {
+      "sample_id": "Con3",
+      "condition_label": "WD"
+    },
+    {
+      "sample_id": "Ext1",
+      "condition_label": "Ext"
+    },
+    {
+      "sample_id": "Ext2",
+      "condition_label": "Ext"
+    },
+    {
+      "sample_id": "Ext3",
+      "condition_label": "Ext"
+    },
+    {
+      "sample_id": "Ret_ext1",
+      "condition_label": "Ret-Ext"
+    },
+    {
+      "sample_id": "Ret_ext2",
+      "condition_label": "Ret-Ext"
+    },
+    {
+      "sample_id": "Ret_ext3",
+      "condition_label": "Ret-Ext"
+    }
+  ],
+  "runtime": {
+    "threads": 4,
+    "blas_threads": 1,
+    "r_libraries": [],
+    "fontconfig_file": null,
+    "font_family": "Arial"
+  },
+  "initial_eligibility": {
+    "method": "native Seurat CreateSeuratObject on original called counts",
+    "min_cells_per_gene": 3,
+    "min_features_per_cell": 300,
+    "preserve_all_called_barcode_audit": true
+  },
+  "qc": {
+    "metric_assay": "observed original UMI counts",
+    "metric_gene_scope": "genes retained by native initial min.cells=3/min.features=300 qualification",
+    "nFeature_lower_exclusive": 700,
+    "nFeature_upper_exclusive": 5000,
+    "nCount_lower_exclusive": 500,
+    "nCount_upper_exclusive": 30000,
+    "percent_mt_upper_exclusive": 5,
+    "log10GenesPerUMI_lower_exclusive": 0.75,
+    "complexity_formula": "log10(nFeature) / log10(nCount)",
+    "nonfinite_metrics_fail": true,
+    "MAD_filters": false,
+    "mitochondrial_gene_ids": [
+      "ENSRNOG00000030644",
+      "ENSRNOG00000031033",
+      "ENSRNOG00000034234",
+      "ENSRNOG00000030371",
+      "ENSRNOG00000033299",
+      "ENSRNOG00000031979",
+      "ENSRNOG00000030700",
+      "ENSRNOG00000033615",
+      "ENSRNOG00000031053",
+      "ENSRNOG00000029707",
+      "ENSRNOG00000029971",
+      "ENSRNOG00000029042",
+      "ENSRNOG00000031766"
+    ],
+    "mitochondrial_symbols": [
+      "ND1",
+      "ND2",
+      "COX1",
+      "COX2",
+      "ATP8",
+      "ATP6",
+      "COX3",
+      "ND3",
+      "ND4L",
+      "ND4",
+      "ND5",
+      "ND6",
+      "CYTB"
+    ],
+    "ribo_symbol_pattern": "^(Rpl|Rps)",
+    "ribo_filter": false,
+    "corrected_metrics_role": "audit only; cannot rescue observed-QC failures",
+    "full_GEX_metrics_role": "diagnostic only; not used for the manuscript thresholds"
+  },
+  "ambient": {
+    "method": "SoupX",
+    "input": "fresh original raw/filtered H5, all called barcodes and input genes",
+    "precluster_genes_min": 200,
+    "precluster_umi_min": 300,
+    "precluster_n_hvg": 2000,
+    "precluster_n_pcs": 30,
+    "precluster_neighbor_dims": 20,
+    "precluster_resolution": 0.6,
+    "round_to_integer": true,
+    "rho_review_max": 0.3,
+    "force_accept": false,
+    "reuse_previous_analysis_counts": false
+  },
+  "doublet": {
+    "method": "scDblFinder",
+    "per_capture": true,
+    "input": "corrected counts of initial-qualified genes and observed-QC-passing nuclei",
+    "clusters": false,
+    "dbr_per_1000": 0.004,
+    "dbr_denominator": "original Cell Ranger-called barcode count per capture before initial eligibility and QC",
+    "dbr_sd": "package default",
+    "xgb_nthreads": 4,
+    "BPPARAM": "SerialParam",
+    "chemistry": "Chromium GEM-X Single Cell 3 prime v4",
+    "vendor_doublet_calls_role": "not combined with exclusions"
+  },
+  "global": {
+    "n_hvg": 2000,
+    "n_pcs": 50,
+    "pc_max": 30,
+    "regress_vars": [
+      "nCount_RNA",
+      "percent.mt"
+    ],
+    "harmony_group_by": "sample_id",
+    "regress_condition": false,
+    "neighbors_k": 20,
+    "resolutions": [
+      0.1,
+      0.2,
+      0.3,
+      0.4,
+      0.5,
+      0.6,
+      0.7,
+      0.8,
+      0.9,
+      1.0
+    ],
+    "primary_resolution": 1.0,
+    "umap_n_neighbors": 30,
+    "umap_min_dist": 0.3,
+    "umap_metric": "cosine",
+    "seed": 42,
+    "threads": 4,
+    "percent_mt_metadata_source": "percent_mt_observed in initial-qualified gene set",
+    "annotation_policy": "fresh clusters; major-cell-type marker review before any lineage subclustering"
+  },
+  "output_interface": {
+    "sample_directory": "02_qc_doublet/<sample_id>",
+    "singlet_object": "02_qc_doublet/<sample_id>/singlet_clean.rds",
+    "all_called_QC": "02_qc_doublet/<sample_id>/all_called_barcodes_QC.csv.gz",
+    "aggregate_summary": "02_qc_doublet/attrition_summary.csv",
+    "primary_assay": "RNA: SoupX-corrected integer UMI counts",
+    "audit_assay": "observed: matching original UMI counts",
+    "metadata_join_key": "sample_id__10x-barcode",
+    "no_old_embeddings_or_labels": true
+  },
+  "input_root": null
+}

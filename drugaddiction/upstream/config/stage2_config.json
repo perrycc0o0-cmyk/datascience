@@ -1,0 +1,70 @@
+{
+  "schema_version": "1.0",
+  "run_id": "20261101_Manuscript_matched_stage2_01",
+  "stage_gate": "neuron_subtype_review",
+  "source_class_column": "major_class_six",
+  "keep_previously_forced_clusters": true,
+  "do_not_refilter": true,
+  "analysis_seed": 42,
+  "runtime": {
+    "threads": 4,
+    "blas_threads": 1,
+    "r_libraries": [],
+    "fontconfig_file": null,
+    "font_family": "Arial"
+  },
+  "processing": {
+    "assay": "RNA",
+    "counts_basis": "Existing SoupX-corrected integer UMI counts; original observed counts retained separately",
+    "normalization": "LogNormalize",
+    "scale_factor": 10000,
+    "hvg_method": "vst",
+    "n_hvg": 2000,
+    "scale_vars_to_regress": [],
+    "pca_components_max": 100,
+    "harmony_pca_dimensions_max": 30,
+    "harmony_group_by": "sample_id",
+    "harmony_max_iter": 10,
+    "harmony_project_dim": false,
+    "neighbor_harmony_dimensions_max": 19,
+    "clustering_algorithm": 1,
+    "resolution": 0.5,
+    "umap_engine": "uwot::umap",
+    "umap_metric": "cosine",
+    "umap_repulsion_strength": 1,
+    "umap_sgd_threads": 1
+  },
+  "lineages": [
+    {
+      "id": "Exc",
+      "source_class": "Excitatory",
+      "expected_nuclei": 62991,
+      "output_directory": "01_Exc",
+      "neighbors_k": 20,
+      "umap_n_neighbors": 10,
+      "umap_min_dist": 0.8,
+      "umap_spread": 6
+    },
+    {
+      "id": "Inh",
+      "source_class": "Inhibitory",
+      "expected_nuclei": 21693,
+      "output_directory": "02_Inh",
+      "neighbors_k": 30,
+      "umap_n_neighbors": 30,
+      "umap_min_dist": 0.3,
+      "umap_spread": 1
+    }
+  ],
+  "annotation_marker_discovery": {
+    "test": "wilcox",
+    "min_pct": 0.25,
+    "logfc_threshold": 0.25,
+    "max_cells_per_ident": 1000,
+    "only_pos": false,
+    "return_thresh": 1,
+    "purpose": "Annotation markers only, not between-condition DE"
+  },
+  "parent_stage1_root": null,
+  "input_rds": null
+}

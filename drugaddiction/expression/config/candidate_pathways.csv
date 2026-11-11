@@ -1,0 +1,44 @@
+candidate_order,ID,Description
+1,GO:0033363,Secretory granule organization
+2,GO:0045055,Regulated exocytosis
+3,GO:0002790,Peptide secretion
+4,GO:0099539,Neuropeptide secretion from presynapse
+5,GO:0007218,Neuropeptide signaling pathway
+6,GO:0030141,Secretory granule
+7,GO:0031045,Dense core granule
+8,GO:0099590,Neurotransmitter receptor internalization
+9,GO:0043161,Proteasome-mediated ubiquitin-dependent protein catabolic process
+10,rno03050,Proteasome
+11,rno04024,cAMP signaling pathway
+12,rno04728,Dopaminergic synapse
+13,rno04723,Retrograde endocannabinoid signaling
+14,rno05031,Amphetamine addiction
+15,rno04720,Long-term potentiation
+16,rno04010,MAPK signaling pathway
+17,rno04722,Neurotrophin signaling pathway
+18,rno04020,Calcium signaling pathway
+19,rno04727,GABAergic synapse
+20,rno04150,mTOR signaling pathway
+21,rno05030,Cocaine addiction
+22,rno04730,Long-term depression
+23,R-RNO-399719,Trafficking of AMPA receptors
+24,rno04810,Regulation of actin cytoskeleton
+25,GO:0007015,Actin filament organization
+26,GO:0050808,Synapse organization
+27,GO:0099173,Postsynapse organization
+28,rno05032,Morphine addiction
+29,rno05034,Alcoholism
+30,rno04724,Glutamatergic synapse
+31,rno04726,Serotonergic synapse
+32,rno04080,Neuroactive ligand-receptor interaction
+33,rno04360,Axon guidance
+34,GO:0035094,response to nicotine
+35,GO:0097305,response to alcohol
+36,GO:0097306,cellular response to alcohol
+37,GO:0098992,neuronal dense core vesicle
+38,GO:0007212,G protein-coupled dopamine receptor signaling pathway
+39,GO:1903351,cellular response to dopamine
+40,GO:1903350,response to dopamine
+41,rno05033,Nicotine addiction
+42,rno04725,Cholinergic synapse
+43,GO:0043278,response to morphine

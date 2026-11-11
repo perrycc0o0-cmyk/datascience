@@ -1,0 +1,37 @@
+#!/usr/bin/env Rscript
+a <- commandArgs(trailingOnly = TRUE)
+if (length(a) != 2L || a[1L] != "--root") stop("Usage: Rscript 00_runtime_preflight.R --root ROOT")
+root <- normalizePath(a[2L], mustWork = TRUE)
+cfg <- jsonlite::read_json(file.path(root, "config", "stage2_config.json"), simplifyVector = FALSE)
+.libPaths(unique(c(unlist(cfg$runtime$r_libraries), .libPaths())))
+pkgs <- c("Seurat", "SeuratObject", "Matrix", "harmony", "uwot", "jsonlite", "future", "ggplot2", "patchwork", "ggrepel", "ragg", "scales")
+missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
+if (length(missing)) stop("Missing packages: ", paste(missing, collapse = ", "))
+if (!file.exists(cfg$input_rds) || !file.exists(file.path(cfg$parent_stage1_root, "05_six_class_review", "assignment_complete.json")))
+  stop("Completed approved input is missing")
+source(file.path(root, "scripts", "01_recluster_neurons.R"), local = TRUE)
+x <- Matrix::sparseMatrix(i = c(1, 2, 3, 1, 2, 3), j = c(1, 1, 2, 3, 4, 4), x = c(2, 3, 4, 5, 1, 2),
+  dims = c(3, 4), dimnames = list(c("GeneA", "GeneB", "GeneC"), paste0("WD1__test", 1:4)))
+assay <- SeuratObject::CreateAssay5Object(counts = x, min.cells = 0, min.features = 0)
+fm <- data.frame(gene_id = paste0("test", 1:3), original_symbol = rownames(x), seurat_feature = rownames(x), row.names = rownames(x))
+assay <- SeuratObject::AddMetaData(assay, metadata = fm)
+fresh <- SeuratObject::CreateSeuratObject(counts = SeuratObject::CreateAssay5Object(counts = x, min.cells = 0, min.features = 0))
+fresh[["RNA"]] <- s2_copy_feature_metadata(assay, fresh[["RNA"]])
+stopifnot(identical(s2_counts(fresh, "RNA"), x), identical(as.character(fresh[["RNA"]][[]]$gene_id), fm$gene_id))
+umap_default <- get("RunUMAP.default", envir = asNamespace("Seurat"))
+ff <- formals(umap_default)
+expected <- list(n.neighbors = 30L, min.dist = .3, spread = 1, repulsion.strength = 1, metric = "cosine")
+observed <- lapply(names(expected), function(nm) eval(ff[[nm]])); names(observed) <- names(expected)
+for (nm in names(expected)) if (!isTRUE(all.equal(observed[[nm]], expected[[nm]], check.attributes = FALSE)))
+  stop("Inhibitory Seurat default mismatch: ", nm)
+for (p in c("scripts/01_recluster_neurons.R", "scripts/00_runtime_preflight.R")) invisible(parse(file = file.path(root, p)))
+if (!is.null(cfg$runtime$fontconfig_file)) Sys.setenv(FONTCONFIG_FILE = cfg$runtime$fontconfig_file)
+font <- system2("fc-match", c("-f", shQuote("%{family}\t%{file}"), "Arial"), stdout = TRUE)
+if (!length(font) || !grepl("Arial", font[1L])) stop("Arial font unavailable")
+report <- list(status = "pass", checked_UTC = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+  packages = stats::setNames(lapply(pkgs, function(z) as.character(utils::packageVersion(z))), pkgs),
+  Seurat_Inh_defaults_verified = observed, sparse_counts_metadata_helper_test = "pass",
+  input_file_exists = TRUE, analysis_executed = FALSE, font = font, raw_or_existing_outputs_modified = FALSE)
+dir.create(file.path(root, "qa"), recursive = TRUE, showWarnings = FALSE)
+jsonlite::write_json(report, file.path(root, "qa", "runtime_preflight.json"), auto_unbox = TRUE, pretty = TRUE)
+cat(jsonlite::toJSON(report, auto_unbox = TRUE, pretty = TRUE), "\n")

@@ -1,0 +1,15 @@
+category_id,category_name,pathway_ID
+C1,Secretory / dense-core vesicle programs,GO:0098992
+C1,Secretory / dense-core vesicle programs,GO:0031045
+C1,Secretory / dense-core vesicle programs,GO:0030141
+C2,mTOR signaling,rno04150
+C3,Synaptic organization / axon guidance,GO:0050808
+C3,Synaptic organization / axon guidance,rno04360
+C4,Neurotransmitter / receptor signaling,rno04725
+C4,Neurotransmitter / receptor signaling,rno04080
+C4,Neurotransmitter / receptor signaling,rno04724
+C5,Dopamine response / receptor signaling,GO:1903351
+C5,Dopamine response / receptor signaling,GO:1903350
+C5,Dopamine response / receptor signaling,GO:0007212
+C6,Drug-associated response programs,GO:0097306
+C6,Drug-associated response programs,rno05032
