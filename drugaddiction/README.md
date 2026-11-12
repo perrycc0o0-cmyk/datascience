@@ -67,3 +67,7 @@ The CellChat comparison uses the abundance-weighted joint neuronal model. The re
 - Berdugo-Vega et al. Cognitive rejuvenation through partial reprogramming of engram cells. *Neuron* 114, 1102–1116.e7 (2026). doi:10.1016/j.neuron.2025.11.028.
 
 The workflow covers computational snRNA-seq analyses. Histology, physiology, and behavioral measurements are outside its scope.
+
+## License
+
+The original analysis code and accompanying documentation in `drugaddiction/` are released under the [MIT License](LICENSE). Third-party software and externally obtained datasets or reference resources remain subject to their own terms.
