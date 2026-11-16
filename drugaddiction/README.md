@@ -1,74 +1,43 @@
-# Rat infralimbic cortex snRNA-seq workflow
+# Rat infralimbic cortex snRNA-seq analysis
 
-Analysis code for the comparison of withdrawal alone (WD), extinction (Ext), and retrieval-extinction (Ret-Ext) in the rat infralimbic cortex. This directory contains the computational workflow used for the current snRNA-seq analyses and their figures. It does not contain sequencing matrices, serialized study objects, or generated results.
+Analysis code and figure-generation scripts for comparing withdrawal alone (WD), extinction (Ext), and retrieval-extinction (Ret-Ext) in the rat infralimbic cortex. The study includes three pooled biological samples per condition, with tissue from five rats per pool.
 
-## Experimental design
+## Contents
 
-There are three independent pooled biological samples per condition and nine libraries in total. Each pooled sample comprises infralimbic tissue from five rats. The pooled sample, not a nucleus or a rat within a pool, is the biological replicate for sample-level comparisons. Use `WD`, `Ext`, and `Ret-Ext` as condition names. Original library identifiers beginning with `Con` map to WD.
+| Directory | Contents |
+| --- | --- |
+| [upstream/](upstream/README.md) | Library QC, SoupX correction, doublet removal, Harmony integration, cell annotation, neuronal subclustering and IEG-high classification |
+| [expression/](expression/README.md) | DESeq2 pseudobulk differential expression, Monocle 2 trajectories, GSEA and gene–category networks |
+| [signaling/](signaling/README.md) | Subtype proportion models and CellChat analysis |
+| [figures/](figures/README.md) | UMAP, marker, composition, proportion, heatmap and communication plots |
 
-## Workflow
+## Requirements
 
-| Directory | Analysis | Scope |
-|---|---|---|
-| `upstream/` | Per-library quality control, ambient RNA correction, doublet removal, sample-batch integration, cell annotation, neuronal subclustering, and IEG-high classification | Fig. 3B–E and the snRNA-seq quality-control and annotation panels |
-| `expression/` | Pairwise pseudobulk differential expression, signature-guided pseudotime, preranked GSEA, and gene–category association | Fig. 3F–J and related supplementary expression panels |
-| `signaling/` | Neuronal proportions and CellChat inference and summaries | Fig. 3K, L and P, and related supplementary panels |
-| `figures/` | Figure assembly and plotting from saved analysis tables | Computational figure panels |
+Use R and the package versions listed in the module documentation. The main packages are Seurat 5.3.1, SeuratObject 5.2.0, SoupX 1.6.2, scDblFinder 1.24.10, Harmony 1.2.4, DESeq2 1.50.2, Monocle 2.38.0, DDRTree 0.1.5, fgsea 1.36.2 and CellChat 1.6.1. The gene–category network builder uses Python 3. Figure export requires Arial and the graphics packages specified in each module.
 
-Each analysis or plotting script is a separate command-line entry point. Run it with `Rscript path/to/script.R ...` (or `python` for the network builder); no master script, workflow launcher, or previously loaded R session is required. Each executable supports `--help`. Local helper files contain reusable functions only and do not start other analyses. Keep the repository's directory structure when using them.
+## Usage
 
-Start with the per-library script, review the broad-cell and neuronal annotations, and supply each next script with the saved inputs it needs. Standalone execution does not remove the scientific dependency on upstream data. Use a separate work directory outside the code folder and do not overwrite completed outputs. From `drugaddiction/`, for example:
+1. Prepare the raw and filtered 10x HDF5 matrices for each library as described in [upstream/README.md](upstream/README.md).
+2. Run library processing, broad-cell annotation and marker review.
+3. Review the neuronal subtype annotations and prepare the IEG-high analysis inputs.
+4. Use the expression, signaling and figure commands with the resulting input files.
+
+Run commands from `drugaddiction/`. Replace example paths with your local input and output paths. Keep analysis outputs outside the code directory and use a new output directory for a new run. Use `--help` to view a script's arguments.
 
 ```bash
 Rscript upstream/stage1/01_process_libraries.R --root /path/to/work/stage1 --input-dir /path/to/10x_libraries
 Rscript upstream/stage1/02_global_celltype.R --root /path/to/work/stage1
-# Run the remaining annotation and review commands listed in upstream/README.md.
+```
+
+Continue with the annotation and input-preparation commands in the upstream instructions. The resulting `stage3/01_inputs/` directory supplies the downstream analyses:
+
+```bash
 Rscript expression/pseudobulk_deseq2.R /path/to/work/stage3/01_inputs/Excitatory/IEGhigh_payload.rds /path/to/work/stage3/01_inputs/Inhibitory/IEGhigh_payload.rds /path/to/work/deseq2
 Rscript expression/plot_deseq2_volcanoes.R /path/to/work/deseq2 /path/to/work/volcanoes
 ```
 
-The complete independent command sequence is documented in [upstream/README.md](upstream/README.md). `01_prepare_analysis_inputs.R` writes the downstream input files in `stage3/01_inputs/`. The [expression](expression/README.md), [signaling](signaling/README.md), and [figure](figures/README.md) documentation lists the commands, saved inputs, outputs and required external reference files for those independent analyses. Only invocation and path handling differ from the previous release; the analysis definitions, parameter files and plotting calculations are unchanged.
-
-## Input data and software
-
-The upstream workflow requires paired raw and cell-called 10x feature-barcode matrices from each of the nine libraries. The raw matrices provide the background droplets for ambient RNA estimation. The documented reference inputs include gene annotation, cell-cluster mappings, gene sets, and rat-to-human orthologs where applicable. Input paths and output paths are supplied locally; do not put credentials, private storage paths, or study matrices into the repository.
-
-Use the package versions listed in the module instructions. The source analyses used SoupX 1.6.2, scDblFinder 1.24.10, Seurat 5.3.1, SeuratObject 5.2.0, Harmony 1.2.4, DESeq2 1.50.2, Monocle 2.38.0, DDRTree 0.1.5, fgsea 1.36.2, and CellChat 1.6.1. Use an R/Bioconductor environment compatible with the versions required by a given module. Figure export uses Arial when available and requires the indicated graphics devices.
-
-## Analysis definitions
-
-### Preprocessing and neuronal states
-
-Ambient RNA correction and doublet detection are performed independently within each library. The workflow uses fixed quality-control criteria and retains corrected integer RNA counts. Harmony integrates sample batches; experimental condition is not an integration covariate. The reported analysis retained 131,480 singlet nuclei. This is an observed result, not a target to which quality-control parameters are tuned.
-
-IEG-high nuclei are identified using the summed log-normalized expression of eight immediate-early genes. The 95th-percentile threshold is calculated separately within excitatory and inhibitory neuronal classes across the study conditions.
-
-### Differential expression and pseudotime
-
-Pairwise differential expression uses corrected integer counts summed within each pooled sample and neuronal class. The primary DESeq2 contrasts use the six pools from the two conditions being compared, with default independent filtering and Benjamini–Hochberg adjustment.
-
-The expression trajectories use a separate nine-pool DESeq2 fit. For the Ret-Ext versus Ext contrast, genes are ranked by nominal P within each fold-change direction. The displayed signatures use 40 genes per direction; this is a ranking rule, not a requirement that 40 genes pass a significance threshold. The Monocle 2 workflow fits the trajectories to IEG-high excitatory nuclei and summarizes pseudotime within each pooled sample. Pseudotime is a relative coordinate along a fitted transcriptional trajectory. The signatures and comparisons come from the same study samples, so these displays do not constitute independent validation of the signatures.
-
-### Enrichment and functional associations
-
-Preranked GSEA uses the signed DESeq2 Wald statistic. The current plots display candidate gene sets with nominal P < 0.05 and report candidate-set BH-FDR separately. A gene–category network links selected genes to functional categories. Its edges indicate category membership, not protein–protein interactions.
-
-### Subtype proportions and predicted communication
-
-Subtype composition within the IEG-high population and the IEG-high fraction within a subtype have different denominators. The proportion-model code and the plotting of final statistical annotations are separate steps. The plot scripts can read final statistical tables without fitting a model.
-
-The CellChat comparison uses the abundance-weighted joint neuronal model. The receiver scopes in the outgoing-strength summary are subsets of that same network: other excitatory subtypes or all other included neuronal subtypes. These estimates are inferred from expression, not direct measurements of projections or synaptic strength.
-
-## Method references
-
-- Young and Behjati. SoupX removes ambient RNA contamination from droplet-based single-cell RNA sequencing data. *GigaScience* 9, giaa151 (2020).
-- Germain et al. Doublet identification in single-cell sequencing data using scDblFinder. *F1000Research* 10, 979 (2021; version 2, 2022).
-- Hochgerner et al. Neuronal types in the mouse amygdala and their transcriptional response to fear conditioning. *Nature Neuroscience* 26, 2237–2249 (2023).
-- Qiu et al. Reversed graph embedding resolves complex single-cell trajectories. *Nature Methods* 14, 979–982 (2017).
-- Berdugo-Vega et al. Cognitive rejuvenation through partial reprogramming of engram cells. *Neuron* 114, 1102–1116.e7 (2026). doi:10.1016/j.neuron.2025.11.028.
-
-The workflow covers computational snRNA-seq analyses. Histology, physiology, and behavioral measurements are outside its scope.
+The module instructions list the required reference files, output tables and figure commands. Sequencing matrices, analysis objects and generated results are not included.
 
 ## License
 
-The original analysis code and accompanying documentation in `drugaddiction/` are released under the [MIT License](LICENSE). Third-party software and externally obtained datasets or reference resources remain subject to their own terms.
+The original analysis code and accompanying documentation in `drugaddiction/` are released under the [MIT License](LICENSE). Third-party software and external data or reference resources remain subject to their own terms.
