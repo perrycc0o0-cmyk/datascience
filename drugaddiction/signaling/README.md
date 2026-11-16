@@ -1,6 +1,6 @@
 # Pooled-sample recruitment models and CellChat
 
-Run the commands from the project directory. Replace `/path/to/work` with the private output directory passed to the upstream workflow. The downstream run root is its `stage3` directory.
+Each script runs as an independent command with its saved inputs; no workflow launcher or prepared R session is required. Executables accept `--help`. `binomial_model_helpers.R` defines model functions and is not an entry point. The examples run from `drugaddiction/`; absolute script paths also work. Replace `/path/to/work` with your private work directory. The downstream run root is its `stage3` directory.
 
 ## Subtype recruitment
 

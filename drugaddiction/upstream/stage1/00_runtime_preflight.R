@@ -1,9 +1,16 @@
 #!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript upstream/stage1/00_runtime_preflight.R --root STAGE1_DIR --input-dir MATRIX_DIR [--config JSON] [--fontconfig-file FILE]\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+.upstream_entry <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1L])
+source(file.path(dirname(dirname(normalizePath(.upstream_entry, mustWork = TRUE))), "script_io.R"))
+
 args <- commandArgs(trailingOnly = TRUE)
-if (length(args) != 1L) stop('Usage: Rscript 00_runtime_preflight.R <run_root>')
-root <- normalizePath(args[[1L]], mustWork = TRUE)
-cfgpath <- file.path(root, 'config', 'processing_config.json')
-stopifnot(file.exists(cfgpath))
+root_arg <- upstream_option('--root', if (length(args) && !startsWith(args[[1L]], '--')) args[[1L]] else NULL)
+root <- upstream_work_directory(root_arg)
+cfgpath <- upstream_processing_configuration(root, upstream_option('--config'))
 if (!requireNamespace('jsonlite', quietly = TRUE)) stop('jsonlite unavailable')
 cfg <- jsonlite::read_json(cfgpath, simplifyVector = FALSE)
 if (!identical(cfg$stage_gate, 'global_celltype_review')) stop('Stage gate is missing')
@@ -19,7 +26,7 @@ inputs$path <- file.path(cfg$input_root, inputs$sample, inputs$kind)
 inputs$exists <- file.exists(inputs$path)
 inputs$bytes <- file.info(inputs$path)$size
 parsecheck <- lapply(c('01_process_libraries.R','02_global_celltype.R','03_plot_global_review.R'), function(p) {
-  f <- file.path(root, 'scripts', p)
+  f <- upstream_script('stage1', p)
   if (!file.exists(f)) stop('Script missing: ', p)
   parse(f)
   list(file = p, parsed = TRUE, md5 = unname(tools::md5sum(f)))

@@ -1,3 +1,10 @@
+#!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript signaling/fit_cellchat.R --root STAGE3_DIR\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+
 # Fit abundance-weighted neuronal CellChat networks.
 # Entry: Rscript --vanilla fit_cellchat.R --root <new run root>
 # source() defines functions only. All result writes remain inside 06_CellChat.

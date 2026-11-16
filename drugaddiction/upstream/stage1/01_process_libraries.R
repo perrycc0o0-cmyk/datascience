@@ -1,4 +1,12 @@
 #!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript upstream/stage1/01_process_libraries.R --root STAGE1_DIR --input-dir MATRIX_DIR [--samples Con1,Ext1] [--resume] [--config JSON] [--fontconfig-file FILE]\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+.upstream_entry <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1L])
+source(file.path(dirname(dirname(normalizePath(.upstream_entry, mustWork = TRUE))), "script_io.R"))
+
 # Original per-library H5 input through fixed-QC singlets only.
 # Usage: Rscript --vanilla 01_process_libraries.R --root RUN [--samples Con1,Ext1] [--resume]
 
@@ -11,10 +19,9 @@ arg <- function(key, default = NULL) {
 }
 root_arg <- arg("--root")
 if (is.null(root_arg)) stop("--root is required")
-root <- normalizePath(root_arg, mustWork = TRUE)
+root <- upstream_work_directory(root_arg)
 resume <- "--resume" %in% args
-cfgfile <- file.path(root, "config", "processing_config.json")
-if (!file.exists(cfgfile)) stop("Missing processing_config.json")
+cfgfile <- upstream_processing_configuration(root, arg("--config"))
 suppressPackageStartupMessages(library(jsonlite))
 cfg <- read_json(cfgfile, simplifyVector = FALSE)
 flat <- function(x) as.character(unlist(x, use.names = FALSE))
@@ -42,7 +49,7 @@ if (!length(font_match) || !grepl("^Arial([, ]|$)", font_match[1])) stop("Arial 
 
 for (d in c("01_ambient", "02_qc_doublet", "logs", "provenance"))
   dir.create(file.path(root, d), recursive = TRUE, showWarnings = FALSE)
-scriptfile <- file.path(root, "scripts", "01_process_libraries.R")
+scriptfile <- upstream_script("stage1", "01_process_libraries.R")
 stopifnot(file.exists(scriptfile))
 cfgmd5 <- unname(tools::md5sum(cfgfile)); scriptmd5 <- unname(tools::md5sum(scriptfile))
 now <- function() format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")

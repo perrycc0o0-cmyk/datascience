@@ -1,3 +1,10 @@
+#!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript figures/render_proportions.R NEURON_METADATA.csv EXC_STATS.csv INH_STATS.csv OUTPUT_DIR\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+
 # Draw observed pooled-sample percentages using an external, finalized statistics table.
 # Usage: Rscript render_proportions.R NEURON_METADATA.csv EXC_STATS.csv INH_STATS.csv OUTPUT_DIR
 suppressPackageStartupMessages({library(ggplot2); library(grid)})

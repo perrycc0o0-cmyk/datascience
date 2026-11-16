@@ -1,4 +1,12 @@
 #!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript upstream/stage2/03_plot_neuron_review.R --root STAGE2_DIR [--runtime-config JSON] [--output-name REVISION]\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+.upstream_entry <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1L])
+source(file.path(dirname(dirname(normalizePath(.upstream_entry, mustWork = TRUE))), "script_io.R"))
+
 # Render saved neuronal-subcluster annotation review only; never fit or relabel.
 
 nr_flat <- function(x) as.character(unlist(x, use.names = FALSE))
@@ -303,5 +311,6 @@ if (sys.nframe() == 0L) {
     if (j == length(a)) stop("Missing value for ", flag)
     a[j + 1L]
   }
-  neuron_review_plot_main(a[2L], runtime_config = opt("--runtime-config"), output_name = opt("--output-name", "04_marker_review"))
+  cp <- upstream_neuron_configuration(upstream_work_directory(a[2L]), opt("--runtime-config"))
+  neuron_review_plot_main(a[2L], runtime_config = cp, output_name = opt("--output-name", "04_marker_review"))
 }

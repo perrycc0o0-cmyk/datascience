@@ -1,4 +1,10 @@
 #!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript expression/candidate_gsea.R DESEQ2_DIR EXC_SYMBOL_ENTREZ.csv INH_SYMBOL_ENTREZ.csv PATHWAY_MEMBERSHIP.csv OUTPUT_DIR\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+
 # Preranked GSEA of the fixed rat candidate pathway panel.
 script <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])
 script_dir <- dirname(normalizePath(script, mustWork = TRUE))

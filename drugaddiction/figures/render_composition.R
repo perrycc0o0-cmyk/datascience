@@ -1,3 +1,10 @@
+#!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript figures/render_composition.R GLOBAL_ANNOTATION.csv.gz NEURON_METADATA.csv OUTPUT_DIR\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+
 # Render condition-pooled descriptive composition of major classes and IEG-high subtypes.
 # Usage: Rscript render_composition.R GLOBAL_ANNOTATION.csv.gz NEURON_METADATA.csv OUTPUT_DIR
 suppressPackageStartupMessages({library(ggplot2); library(grid)})

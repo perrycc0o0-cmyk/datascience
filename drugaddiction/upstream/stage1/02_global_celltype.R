@@ -1,4 +1,12 @@
 #!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript upstream/stage1/02_global_celltype.R --root STAGE1_DIR [--config JSON]\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+.upstream_entry <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1L])
+source(file.path(dirname(dirname(normalizePath(.upstream_entry, mustWork = TRUE))), "script_io.R"))
+
 # Stage 1: fresh global latent space and provisional broad-class marker evidence.
 # This script deliberately contains no neuronal subclustering or condition DE.
 
@@ -394,7 +402,7 @@ run_stage1_global <- function(root, config = file.path(root, "config", "processi
         seed = seed, thread_limits = c(neighbor_search = threads, SGD = 1L), parameters = umap_args)),
       annotations = "Provisional cluster-level marker review; not atlas probabilities or final user approval",
       stop_after = "global_celltype_review", subclustering_started = FALSE, downstream_started = FALSE)
-    obj@misc$manuscript_stage1$script_md5 <- unname(tools::md5sum(file.path(root, "scripts", "02_global_celltype.R")))
+    obj@misc$manuscript_stage1$script_md5 <- unname(tools::md5sum(upstream_script("stage1", "02_global_celltype.R")))
     obj@misc$manuscript_stage1$sample_naming_md5 <- unname(tools::md5sum(naming_path))
     obj@misc$manuscript_stage1$sample_naming <- sample_map
     obj@misc$manuscript_stage1$runtime <- list(library_paths = .libPaths(),
@@ -422,7 +430,7 @@ run_stage1_global <- function(root, config = file.path(root, "config", "processi
 if (sys.nframe() == 0L && Sys.getenv("STAGE1_SOURCE_ONLY") != "1") {
   a <- commandArgs(trailingOnly = TRUE)
   if (length(a) < 2L || a[[1L]] != "--root") stop("Usage: Rscript 02_global_celltype.R --root NEW_ROOT [--config CONFIG]")
-  cp <- if ("--config" %in% a) a[[match("--config", a) + 1L]] else file.path(a[[2L]], "config", "processing_config.json")
+  cp <- upstream_processing_configuration(upstream_work_directory(a[[2L]]), upstream_option("--config"))
   if (!requireNamespace("jsonlite", quietly = TRUE)) stop("jsonlite is required to read configuration.")
   run_stage1_global(a[[2L]], cp)
 }

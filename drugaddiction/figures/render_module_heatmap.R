@@ -1,4 +1,10 @@
 #!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript figures/render_module_heatmap.R EXC_PAYLOAD.rds OUTPUT_DIR\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+
 # Fixed-list expression display. The panel is not a differential-expression test.
 args <- commandArgs(TRUE)
 if (length(args) != 2L) {

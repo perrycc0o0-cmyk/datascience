@@ -1,4 +1,10 @@
 #!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript signaling/fit_binomial_models.R NEURON_METADATA.csv STAGE3_DIR\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+
 # Binomial mixed models on new accepted IEG-high count summaries.
 args <- commandArgs(TRUE)
 if (length(args) != 2L) stop("Usage: Rscript fit_binomial_models.R NEURON_METADATA.csv RUN_ROOT")

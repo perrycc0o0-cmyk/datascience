@@ -1,4 +1,10 @@
 #!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript signaling/prepare_orthology.R --root STAGE3_DIR\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+
 # Freeze public Ensembl116 rat-human homology independently of model inference.
 args <- commandArgs(trailingOnly = TRUE)
 i <- match("--root", args)

@@ -1,4 +1,12 @@
 #!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript upstream/stage1/07_plot_six_class_review.R --root STAGE1_DIR [--config JSON]\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+.upstream_entry <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1L])
+source(file.path(dirname(dirname(normalizePath(.upstream_entry, mustWork = TRUE))), "script_io.R"))
+
 # Six-class display review after user-requested nearest-class matching.
 # The original broad-class labels and matching uncertainty remain in source data.
 # This renderer does not alter matrices, embeddings or matching assignments.
@@ -161,7 +169,7 @@ stage1_sixclass_plot_main <- function(root, config = file.path(root, "config", "
   pC <- dotplot(cluster_stats, genes, cluster_levels, "Canonical markers across new clusters")
   save_plot(pC, "02_DotPlot/C_canonical_markers_by_cluster", 183, max(100, 35 + length(cluster_ids) * 3.6))
   # Recompute gene-wise color scaling within this displayed grouping, as in Seurat DotPlot.
-  source(file.path(root, "scripts", "02_global_celltype.R"), local = TRUE)
+  source(upstream_script("stage1", "02_global_celltype.R"), local = TRUE)
   group_levels <- names(used_palette)
   group_stats <- do.call(rbind, lapply(rownames(x), function(g) stage1_gene_stats(
     as.numeric(x[g, ]), g, as.character(d$proposed_major_class), group_levels)))
@@ -236,6 +244,6 @@ if (sys.nframe() == 0L && Sys.getenv("STAGE1_SOURCE_ONLY") != "1") {
   a <- commandArgs(trailingOnly = TRUE)
   if (length(a) < 2L || a[[1L]] != "--root") stop("Usage: Rscript 07_plot_six_class_review.R --root NEW_ROOT [--config CONFIG]")
   if (!requireNamespace("jsonlite", quietly = TRUE)) stop("jsonlite is required to read configuration.")
-  cp <- if ("--config" %in% a) a[[match("--config", a) + 1L]] else file.path(a[[2L]], "config", "processing_config.json")
+  cp <- upstream_processing_configuration(upstream_work_directory(a[[2L]]), upstream_option("--config"))
   stage1_sixclass_plot_main(a[[2L]], cp)
 }

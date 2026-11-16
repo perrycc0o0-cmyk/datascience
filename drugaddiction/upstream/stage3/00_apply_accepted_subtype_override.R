@@ -1,4 +1,12 @@
 #!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript upstream/stage3/00_apply_accepted_subtype_override.R STAGE2_DIR\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+.upstream_entry <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1L])
+source(file.path(dirname(dirname(normalizePath(.upstream_entry, mustWork = TRUE))), "script_io.R"))
+
 # Recreate the study's accepted cluster-6 annotation change from stage-2 results.
 # The input label, size and output counts are verified before writing the mapping.
 a <- commandArgs(trailingOnly = TRUE)

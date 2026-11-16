@@ -1,4 +1,12 @@
 #!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript upstream/stage1/06_match_six_major_classes.R --root STAGE1_DIR [--config JSON]\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+.upstream_entry <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1L])
+source(file.path(dirname(dirname(normalizePath(.upstream_entry, mustWork = TRUE))), "script_io.R"))
+
 # Assign previously unresolved global clusters to their nearest of six reference classes.
 # This changes annotation metadata only; it does not normalize, integrate or recluster.
 
@@ -185,7 +193,7 @@ sixclass_main <- function(root) {
       minimum_query_nuclei_per_library = 10L, minimum_reference_nuclei_per_library_class = 20L,
       annotation_is_probability = FALSE, vascular_flags_preserved = TRUE,
       subclustering_started = FALSE, downstream_started = FALSE,
-      script_md5 = unname(tools::md5sum(file.path(root, "scripts", "06_match_six_major_classes.R"))))
+      script_md5 = unname(tools::md5sum(upstream_script("stage1", "06_match_six_major_classes.R"))))
     jsonlite::write_json(report, file.path(out, "assignment_complete.json"), auto_unbox = TRUE, pretty = TRUE, digits = 16)
     update("six_class_annotation_ready", "complete", reassigned_clusters = matching$cluster)
     print(matching[, c("cluster", "initial_class", "assigned_class", "mean_spearman", "score_margin", "library_winner_agreement", "vascular_review_flag")], row.names = FALSE)
@@ -197,7 +205,8 @@ sixclass_main <- function(root) {
 
 if (sys.nframe() == 0L) {
   a <- commandArgs(trailingOnly = TRUE)
-  if (length(a) != 2L || a[[1L]] != "--root") stop("Usage: Rscript 06_match_six_major_classes.R --root RUN_ROOT")
+  if (length(a) < 2L || a[[1L]] != "--root") stop("Usage: Rscript 06_match_six_major_classes.R --root RUN_ROOT [--config CONFIG]")
   if (!requireNamespace("jsonlite", quietly = TRUE)) stop("jsonlite is required")
+  upstream_processing_configuration(upstream_work_directory(a[[2L]]), upstream_option("--config"))
   sixclass_main(a[[2L]])
 }

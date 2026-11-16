@@ -1,6 +1,6 @@
 # Expression analysis and figures
 
-Run these scripts from the `drugaddiction` directory. Use a separate, empty directory for each output. The analysis scripts write the results and an R session report; the plotting scripts consume those results without refitting or adjusting the statistics.
+Each analysis or plotting script runs separately with the saved inputs listed below; no workflow launcher or previously loaded R session is required. The examples use paths relative to `drugaddiction`. Absolute script and input paths work from another directory. Run an executable with `--help` to print its command syntax. Keep the local helper and configuration files alongside the scripts; helpers define functions only and are not analysis entry points. Use a separate, empty directory for each output. The analysis scripts write the results and an R session report; the plotting scripts consume those results without refitting or adjusting the statistics.
 
 ## Inputs and environment
 
@@ -11,8 +11,8 @@ Run these scripts from the `drugaddiction` directory. Use a separate, empty dire
 ## Pseudobulk differential expression and volcano plots
 
 ```sh
-Rscript expression/pseudobulk_deseq2.R work/stage3/01_inputs/Excitatory/IEGhigh_payload.rds work/stage3/01_inputs/Inhibitory/IEGhigh_payload.rds work/deseq2
-Rscript expression/plot_deseq2_volcanoes.R work/deseq2 work/volcanoes
+Rscript expression/pseudobulk_deseq2.R /path/to/work/stage3/01_inputs/Excitatory/IEGhigh_payload.rds /path/to/work/stage3/01_inputs/Inhibitory/IEGhigh_payload.rds /path/to/work/deseq2
+Rscript expression/plot_deseq2_volcanoes.R /path/to/work/deseq2 /path/to/work/volcanoes
 ```
 
 Sum counts within each independent pool and neuronal class. Fit `~ condition` for each two-condition comparison, using the three independent pools in each condition. The initial expression filter is recomputed within each contrast using `edgeR::filterByExpr`. The DESeq2 Wald analysis uses median-of-ratios normalization, native Cook's-distance protection, default independent filtering at `alpha = 0.05`, and BH adjustment. The WD contrasts retain the same-model convergence retry at `maxit = 1000` only if needed.
@@ -22,8 +22,8 @@ Sum counts within each independent pool and neuronal class. Fit `~ condition` fo
 ## Signature-guided trajectories
 
 ```sh
-Rscript expression/signature_trajectories.R work/stage3/01_inputs/Excitatory/IEGhigh_payload.rds work/deseq2/datasets/Excitatory__RetExt_vs_Ext/tables/ALL_genes.csv work/trajectories
-Rscript expression/plot_signature_trajectories.R work/trajectories work/trajectory_figures
+Rscript expression/signature_trajectories.R /path/to/work/stage3/01_inputs/Excitatory/IEGhigh_payload.rds /path/to/work/deseq2/datasets/Excitatory__RetExt_vs_Ext/tables/ALL_genes.csv /path/to/work/trajectories
+Rscript expression/plot_signature_trajectories.R /path/to/work/trajectories /path/to/work/trajectory_figures
 ```
 
 Keep the six-pool excitatory Ret-Ext vs Ext eligibility mask but fit `~ condition` with all nine pools to estimate the ranking contrast. Rank genes separately by fold-change direction, ascending nominal P, descending absolute log2 fold change, then feature identifier. Fit one independent Monocle 2 DDRTree trajectory for each direction and each signature size (10, 20, 30, 40, 50, 100, 200, 300, 400, 500). The manuscript display uses the two 40-gene signatures.
@@ -33,10 +33,10 @@ Set the trajectory root to the structurally eligible state containing the most W
 ## Candidate GSEA and gene-category network
 
 ```sh
-Rscript expression/candidate_gsea.R work/deseq2 references/excitatory_symbol_entrez.csv references/inhibitory_symbol_entrez.csv references/rat_candidate_pathway_membership.csv work/gsea
-Rscript expression/plot_candidate_gsea.R work/gsea work/gsea_figures
-python expression/gene_category_network.py work/deseq2 work/gsea work/gene_category_network
-Rscript expression/plot_gene_category_network.R work/gene_category_network work/network_figures
+Rscript expression/candidate_gsea.R /path/to/work/deseq2 /path/to/references/excitatory_symbol_entrez.csv /path/to/references/inhibitory_symbol_entrez.csv /path/to/references/rat_candidate_pathway_membership.csv /path/to/work/gsea
+Rscript expression/plot_candidate_gsea.R /path/to/work/gsea /path/to/work/gsea_figures
+python expression/gene_category_network.py /path/to/work/deseq2 /path/to/work/gsea /path/to/work/gene_category_network
+Rscript expression/plot_gene_category_network.R /path/to/work/gene_category_network /path/to/work/network_figures
 ```
 
 The repository includes the 43 pathway IDs, display names, and original candidate order. The reference annotation itself is external:

@@ -1,9 +1,18 @@
 #!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript upstream/stage3/01_prepare_analysis_inputs.R --root STAGE3_DIR [--stage2 STAGE2_DIR] [--config JSON]\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+.upstream_entry <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1L])
+source(file.path(dirname(dirname(normalizePath(.upstream_entry, mustWork = TRUE))), "script_io.R"))
+
 # Freeze accepted neuronal labels and expression inputs without changing upstream objects.
-a <- commandArgs(TRUE); stopifnot(length(a)==1L)
-out <- normalizePath(a[1],mustWork=TRUE)
+a <- commandArgs(TRUE)
+root_arg <- upstream_option('--root', if (length(a) && !startsWith(a[1L], '--')) a[1L] else NULL)
+out <- upstream_work_directory(root_arg)
 suppressPackageStartupMessages(library(jsonlite))
-c0 <- read_json(file.path(out,'config/analysis_contract.json'),simplifyVector=FALSE)
+c0 <- read_json(upstream_analysis_configuration(out, upstream_option('--config')),simplifyVector=FALSE)
 flat <- function(x) as.character(unlist(x,use.names=FALSE))
 stage2 <- file.path(c0$base,c0$upstream_stage2)
 rt <- read_json(file.path(stage2,'config/stage2_config.json'),simplifyVector=FALSE)$runtime

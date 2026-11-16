@@ -1,4 +1,12 @@
 #!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript upstream/stage2/02_annotate_neuron_subtypes.R --root STAGE2_DIR [--config JSON] [--marker-config JSON]; or --self-test\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+.upstream_entry <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1L])
+source(file.path(dirname(dirname(normalizePath(.upstream_entry, mustWork = TRUE))), "script_io.R"))
+
 # Marker-supported proposals for the newly clustered neuronal objects.
 # Reads existing RNA/data; does not refilter, normalize, integrate or recluster.
 
@@ -268,7 +276,7 @@ run_neuron_annotation <- function(root, config = file.path(root, "config", "stag
     nr_write_json(status, file.path(out, "status.json"))
   }
   small_inputs <- c(config, marker_config, recluster_done,
-    file.path(root, "scripts", "02_annotate_neuron_subtypes.R"))
+    upstream_script("stage2", "02_annotate_neuron_subtypes.R"))
   small_inputs <- small_inputs[file.exists(small_inputs)]
   small_before <- tools::md5sum(small_inputs)
   all_records <- list()
@@ -524,7 +532,8 @@ if (sys.nframe() == 0L && Sys.getenv("NEURON_ANNOTATION_SOURCE_ONLY") != "1") {
       if (j == length(args)) stop("Missing path after ", flag)
       args[[j + 1L]]
     }
-    run_neuron_annotation(args[[2L]], take("--config", file.path(args[[2L]], "config", "stage2_config.json")),
+    cp <- upstream_neuron_configuration(upstream_work_directory(args[[2L]]), take("--config", NULL))
+    run_neuron_annotation(args[[2L]], cp,
       take("--marker-config", file.path(args[[2L]], "config", "subtype_markers_and_style.json")))
   }
 }

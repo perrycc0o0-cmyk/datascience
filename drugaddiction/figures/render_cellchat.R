@@ -1,3 +1,10 @@
+#!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript figures/render_cellchat.R STAGE3_DIR OUTPUT_DIR\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+
 # Render manuscript CellChat panels from calculated joint-model tables only.
 # Usage: Rscript render_cellchat.R RUN_ROOT OUTPUT_DIR
 suppressPackageStartupMessages({library(CellChat); library(grid)})

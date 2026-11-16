@@ -1,15 +1,24 @@
 #!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript upstream/stage2/00_runtime_preflight.R --root STAGE2_DIR [--stage1 STAGE1_DIR] [--config JSON] [--fontconfig-file FILE]\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+.upstream_entry <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1L])
+source(file.path(dirname(dirname(normalizePath(.upstream_entry, mustWork = TRUE))), "script_io.R"))
+
 a <- commandArgs(trailingOnly = TRUE)
-if (length(a) != 2L || a[1L] != "--root") stop("Usage: Rscript 00_runtime_preflight.R --root ROOT")
-root <- normalizePath(a[2L], mustWork = TRUE)
-cfg <- jsonlite::read_json(file.path(root, "config", "stage2_config.json"), simplifyVector = FALSE)
+if (length(a) < 2L || a[1L] != "--root") stop("Usage: Rscript 00_runtime_preflight.R --root ROOT [--stage1 STAGE1_DIRECTORY]")
+root <- upstream_work_directory(a[2L])
+cfgpath <- upstream_neuron_configuration(root, upstream_option("--config"))
+cfg <- jsonlite::read_json(cfgpath, simplifyVector = FALSE)
 .libPaths(unique(c(unlist(cfg$runtime$r_libraries), .libPaths())))
 pkgs <- c("Seurat", "SeuratObject", "Matrix", "harmony", "uwot", "jsonlite", "future", "ggplot2", "patchwork", "ggrepel", "ragg", "scales")
 missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
 if (length(missing)) stop("Missing packages: ", paste(missing, collapse = ", "))
 if (!file.exists(cfg$input_rds) || !file.exists(file.path(cfg$parent_stage1_root, "05_six_class_review", "assignment_complete.json")))
   stop("Completed approved input is missing")
-source(file.path(root, "scripts", "01_recluster_neurons.R"), local = TRUE)
+source(upstream_script("stage2", "01_recluster_neurons.R"), local = TRUE)
 x <- Matrix::sparseMatrix(i = c(1, 2, 3, 1, 2, 3), j = c(1, 1, 2, 3, 4, 4), x = c(2, 3, 4, 5, 1, 2),
   dims = c(3, 4), dimnames = list(c("GeneA", "GeneB", "GeneC"), paste0("WD1__test", 1:4)))
 assay <- SeuratObject::CreateAssay5Object(counts = x, min.cells = 0, min.features = 0)
@@ -24,7 +33,7 @@ expected <- list(n.neighbors = 30L, min.dist = .3, spread = 1, repulsion.strengt
 observed <- lapply(names(expected), function(nm) eval(ff[[nm]])); names(observed) <- names(expected)
 for (nm in names(expected)) if (!isTRUE(all.equal(observed[[nm]], expected[[nm]], check.attributes = FALSE)))
   stop("Inhibitory Seurat default mismatch: ", nm)
-for (p in c("scripts/01_recluster_neurons.R", "scripts/00_runtime_preflight.R")) invisible(parse(file = file.path(root, p)))
+for (p in c("01_recluster_neurons.R", "00_runtime_preflight.R")) invisible(parse(file = upstream_script("stage2", p)))
 if (!is.null(cfg$runtime$fontconfig_file)) Sys.setenv(FONTCONFIG_FILE = cfg$runtime$fontconfig_file)
 font <- system2("fc-match", c("-f", shQuote("%{family}\t%{file}"), "Arial"), stdout = TRUE)
 if (!length(font) || !grepl("Arial", font[1L])) stop("Arial font unavailable")

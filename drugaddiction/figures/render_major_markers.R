@@ -1,3 +1,10 @@
+#!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript figures/render_major_markers.R SIX_CLASS_OBJECT.rds OUTPUT_DIR\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+
 # Render the manuscript global UMAP, major-class marker dots and marker feature panels.
 # Usage: Rscript render_major_markers.R SIX_CLASS_OBJECT.rds OUTPUT_DIR
 suppressPackageStartupMessages({library(Seurat); library(ggplot2); library(grid); library(scattermore)})

@@ -1,4 +1,10 @@
 #!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript expression/plot_signature_trajectories.R TRAJECTORY_DIR OUTPUT_DIR\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+
 # Render the selected 40-gene trajectories using the stored pooled means and BH20.
 script <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])
 here <- dirname(normalizePath(script, mustWork = TRUE))

@@ -1,6 +1,6 @@
 # Manuscript figure rendering
 
-Use Arial, a Cairo-enabled R build, `ggplot2`, `ragg` and `svglite`. The scripts write PDF, SVG and 600 dpi PNG to the specified output directory. Upstream marker and subtype review scripts are listed in the [upstream documentation](../upstream/README.md).
+Each figure script is a separate executable that reads saved inputs and does not invoke preprocessing or another analysis. Use `Rscript path/to/script.R --help` for its command syntax. Use Arial, a Cairo-enabled R build, `ggplot2`, `ragg` and `svglite`. The scripts write PDF, SVG and 600 dpi PNG to the specified output directory. The examples run from `drugaddiction/`; absolute script paths also work. Upstream marker and subtype review scripts are listed in the [upstream documentation](../upstream/README.md).
 
 | Script | Panels | Inputs |
 | --- | --- | --- |

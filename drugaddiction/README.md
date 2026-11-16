@@ -15,18 +15,19 @@ There are three independent pooled biological samples per condition and nine lib
 | `signaling/` | Neuronal proportions and CellChat inference and summaries | Fig. 3K, L and P, and related supplementary panels |
 | `figures/` | Figure assembly and plotting from saved analysis tables | Computational figure panels |
 
-Read each module's instructions before running it. Start with the per-library workflow, complete the reviewed cell annotations, and pass the resulting analysis objects and pseudobulk inputs to the downstream modules. The upstream and downstream modules keep intermediate objects separate from source code. Use a new output directory for a new analysis run.
+Each analysis or plotting script is a separate command-line entry point. Run it with `Rscript path/to/script.R ...` (or `python` for the network builder); no master script, workflow launcher, or previously loaded R session is required. Each executable supports `--help`. Local helper files contain reusable functions only and do not start other analyses. Keep the repository's directory structure when using them.
 
-From the `drugaddiction/` directory, the upstream entry point is:
+Start with the per-library script, review the broad-cell and neuronal annotations, and supply each next script with the saved inputs it needs. Standalone execution does not remove the scientific dependency on upstream data. Use a separate work directory outside the code folder and do not overwrite completed outputs. From `drugaddiction/`, for example:
 
 ```bash
-python upstream/run.py preprocess --input-dir /path/to/10x_libraries --run-dir /path/to/work/study
-python upstream/run.py global --run-dir /path/to/work/study
-python upstream/run.py neurons --run-dir /path/to/work/study
-python upstream/run.py prepare --run-dir /path/to/work/study
+Rscript upstream/stage1/01_process_libraries.R --root /path/to/work/stage1 --input-dir /path/to/10x_libraries
+Rscript upstream/stage1/02_global_celltype.R --root /path/to/work/stage1
+# Run the remaining annotation and review commands listed in upstream/README.md.
+Rscript expression/pseudobulk_deseq2.R /path/to/work/stage3/01_inputs/Excitatory/IEGhigh_payload.rds /path/to/work/stage3/01_inputs/Inhibitory/IEGhigh_payload.rds /path/to/work/deseq2
+Rscript expression/plot_deseq2_volcanoes.R /path/to/work/deseq2 /path/to/work/volcanoes
 ```
 
-Keep the work directory outside `drugaddiction/`. The `prepare` step writes the handoff files under the work directory's `stage3/01_inputs/` subdirectory. Each downstream module documents which files it reads and which reference inputs must be supplied separately.
+The complete independent command sequence is documented in [upstream/README.md](upstream/README.md). `01_prepare_analysis_inputs.R` writes the downstream input files in `stage3/01_inputs/`. The [expression](expression/README.md), [signaling](signaling/README.md), and [figure](figures/README.md) documentation lists the commands, saved inputs, outputs and required external reference files for those independent analyses. Only invocation and path handling differ from the previous release; the analysis definitions, parameter files and plotting calculations are unchanged.
 
 ## Input data and software
 

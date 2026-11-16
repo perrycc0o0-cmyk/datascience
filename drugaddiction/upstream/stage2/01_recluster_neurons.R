@@ -1,4 +1,12 @@
 #!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript upstream/stage2/01_recluster_neurons.R --root STAGE2_DIR [--stage1 STAGE1_DIR] [--config JSON] [--fontconfig-file FILE]\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+.upstream_entry <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1L])
+source(file.path(dirname(dirname(normalizePath(.upstream_entry, mustWork = TRUE))), "script_io.R"))
+
 # Independently recompute Exc/Inh latent spaces from the approved stage-1 cells.
 # No new QC, cell exclusion, subtype assignment or condition comparison is performed.
 
@@ -115,7 +123,7 @@ run_stage2_recluster <- function(root, config = file.path(root, "config", "stage
     s2_json(runtime, file.path(root, "provenance", "runtime.json"))
     s2_json(list(input_rds = input, input_bytes = input_before$size, input_mtime = as.character(input_before$mtime),
       parent_nuclei = ncol(parent), config_md5 = unname(tools::md5sum(config)),
-      script_md5 = unname(tools::md5sum(file.path(root, "scripts", "01_recluster_neurons.R")))),
+      script_md5 = unname(tools::md5sum(upstream_script("stage2", "01_recluster_neurons.R")))),
       file.path(root, "provenance", "input_provenance.json"))
     summaries <- list()
     for (spec in cfg$lineages) {
@@ -286,7 +294,8 @@ run_stage2_recluster <- function(root, config = file.path(root, "config", "stage
 
 if (sys.nframe() == 0L && Sys.getenv("STAGE2_SOURCE_ONLY") != "1") {
   a <- commandArgs(trailingOnly = TRUE)
-  if (length(a) != 2L || a[1L] != "--root") stop("Usage: Rscript 01_recluster_neurons.R --root NEW_STAGE2_ROOT")
+  if (length(a) < 2L || a[1L] != "--root") stop("Usage: Rscript 01_recluster_neurons.R --root NEW_STAGE2_ROOT [--stage1 STAGE1_DIRECTORY] [--config CONFIG]")
   if (!requireNamespace("jsonlite", quietly = TRUE)) stop("jsonlite is required to read configuration")
-  run_stage2_recluster(a[2L])
+  cp <- upstream_neuron_configuration(upstream_work_directory(a[2L]), upstream_option("--config"))
+  run_stage2_recluster(a[2L], cp)
 }

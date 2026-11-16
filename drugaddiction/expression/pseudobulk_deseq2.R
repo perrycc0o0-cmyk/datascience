@@ -1,4 +1,10 @@
 #!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript expression/pseudobulk_deseq2.R EXC_PAYLOAD.rds INH_PAYLOAD.rds OUTPUT_DIR\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+
 # Six original pools per contrast; integer counts and native independent filtering.
 script <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])
 source(file.path(dirname(normalizePath(script, mustWork = TRUE)), "workflow_helpers.R"))

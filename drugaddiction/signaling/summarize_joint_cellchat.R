@@ -1,3 +1,10 @@
+#!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript signaling/summarize_joint_cellchat.R STAGE3_DIR\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+
 # Summarize the Ext and Ret-Ext conditions from the same joint neuronal model.
 # Usage: Rscript summarize_joint_cellchat.R RUN_ROOT
 suppressPackageStartupMessages(library(CellChat))

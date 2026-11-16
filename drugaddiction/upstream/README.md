@@ -10,16 +10,48 @@ Use Python 3 and R with the package versions in [`config/runtime_versions.json`]
 
 ## Run the stages
 
-Use a private output directory outside the code folder. Each command writes the native stage-specific files below that directory.
+Each R script runs directly, without a Python launcher or a prepared R session. Keep the source tree intact; `script_io.R` provides path and configuration utilities and never invokes an analysis. Use a private work directory outside the code folder. `--root` identifies the stage's working directory, not the source directory. Each command creates only its own outputs; it does not automatically execute the next stage. All executables accept `--help`.
+
+Run the following commands individually from `drugaddiction/`. Absolute script paths also work from another current directory.
 
 ```bash
-python3 upstream/run.py preprocess --input-dir /path/to/matrices --run-dir /path/to/work
-python3 upstream/run.py global --run-dir /path/to/work
-python3 upstream/run.py neurons --run-dir /path/to/work
-python3 upstream/run.py prepare --run-dir /path/to/work
+# Library processing and broad-cell annotation
+Rscript upstream/stage1/00_runtime_preflight.R --root /path/to/work/stage1 --input-dir /path/to/matrices
+Rscript upstream/stage1/01_process_libraries.R --root /path/to/work/stage1 --input-dir /path/to/matrices
+Rscript upstream/stage1/02_global_celltype.R --root /path/to/work/stage1
+Rscript upstream/stage1/03_plot_global_review.R --root /path/to/work/stage1
+Rscript upstream/stage1/06_match_six_major_classes.R --root /path/to/work/stage1
+Rscript upstream/stage1/07_plot_six_class_review.R --root /path/to/work/stage1
+
+# After reviewing the broad-cell marker results
+Rscript upstream/stage2/00_runtime_preflight.R --root /path/to/work/stage2 --stage1 /path/to/work/stage1
+Rscript upstream/stage2/01_recluster_neurons.R --root /path/to/work/stage2 --stage1 /path/to/work/stage1
+Rscript upstream/stage2/02_annotate_neuron_subtypes.R --root /path/to/work/stage2
+Rscript upstream/stage2/03_plot_neuron_review.R --root /path/to/work/stage2
+
+# After reviewing the neuronal subtype markers
+Rscript upstream/stage3/00_apply_accepted_subtype_override.R /path/to/work/stage2
+Rscript upstream/stage3/01_prepare_analysis_inputs.R --root /path/to/work/stage3 --stage2 /path/to/work/stage2
 ```
 
-Review the global marker panels before proceeding to `neurons`, and the neuronal subtype panels before `prepare`. A failed per-library run can be resumed with the same `preprocess` command plus `--resume`; use the same input matrices, configuration and scripts. Completed analysis outputs are not overwritten. The original marker-review renderers are included here; presentation-only layout revisions are separate from the processing and annotation stages.
+The first command for a stage initializes its configuration from the unchanged templates in `config/` and records local paths in the private stage directory. No scripts are copied into that work directory. Later scripts reuse that saved configuration. Use `--config /path/to/config.json` for an explicit configuration. Library processing requires `--input-dir` only when the saved configuration has no input path. Neuronal steps can infer a sibling `stage1` directory; input preparation can infer a sibling `stage2` directory. Use the explicit `--stage1` and `--stage2` options shown above for other layouts. If Arial needs a local Fontconfig file, pass the same `--fontconfig-file /path/to/fonts.conf` when initializing the processing or neuronal stage. Existing configurations with different paths or values are rejected rather than silently overwritten.
+
+Review the global marker panels before neuronal reclustering and the neuronal subtype panels before input preparation. Resume failed per-library processing by calling `01_process_libraries.R` with the same arguments plus `--resume`; use the same input matrices, configuration and scripts. Completed analysis outputs are not overwritten. The original marker-review renderers are included here; presentation-only layout revisions are separate from the processing and annotation stages. The direct entry points do not change QC thresholds, correction methods, annotation rules, seeds, analysis order, or plotting calculations.
+
+| Standalone script | Required saved input | Output location within its stage directory |
+| --- | --- | --- |
+| `stage1/00_runtime_preflight.R` | Original raw and filtered matrices | `qa/` environment checks |
+| `stage1/01_process_libraries.R` | Original raw and filtered matrices | `01_ambient/`, `02_qc_doublet/` |
+| `stage1/02_global_celltype.R` | Per-library singlet objects | `03_global/` |
+| `stage1/03_plot_global_review.R` | Saved global marker payload | `04_celltype_review/` |
+| `stage1/06_match_six_major_classes.R` | Saved global object and marker payload | `05_six_class_review/` annotations |
+| `stage1/07_plot_six_class_review.R` | Six-class annotations and global payload | `05_six_class_review/` figures |
+| `stage2/00_runtime_preflight.R` | Accepted six-class object | `qa/` environment checks |
+| `stage2/01_recluster_neurons.R` | Accepted six-class object | `01_Exc/`, `02_Inh/` |
+| `stage2/02_annotate_neuron_subtypes.R` | Reclustering objects and completion record | `03_annotation/` |
+| `stage2/03_plot_neuron_review.R` | Saved subtype marker payloads | `04_marker_review/` |
+| `stage3/00_apply_accepted_subtype_override.R` | Inhibitory annotation CSV | Mapping in the supplied stage-2 directory |
+| `stage3/01_prepare_analysis_inputs.R` | Neuronal objects, annotations and accepted mapping | `01_inputs/` |
 
 ### Stage 1: Library processing and broad classes
 

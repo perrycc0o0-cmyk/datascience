@@ -1,4 +1,10 @@
 #!/usr/bin/env Rscript
+if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
+  cat("Usage: Rscript expression/plot_candidate_gsea.R GSEA_DIR OUTPUT_DIR\n")
+  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
+  quit(save = "no", status = 0L)
+}
+
 # Render nominal-P-selected candidate pathways; ridge fill represents candidate-family FDR.
 script <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])
 here <- dirname(normalizePath(script, mustWork = TRUE))
