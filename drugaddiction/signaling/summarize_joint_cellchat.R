@@ -1,16 +1,28 @@
-#!/usr/bin/env Rscript
-if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
-  cat("Usage: Rscript signaling/summarize_joint_cellchat.R STAGE3_DIR\n")
-  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
-  quit(save = "no", status = 0L)
-}
+# summarize joint cellchat
 
+# 1. Packages
+library(CellChat)
+library(jsonlite, include.only = character())
+library(digest, include.only = character())
+
+# 2. Paths
+work_dir <- "/path/to/work"
+result_dir <- file.path(work_dir, "stage3")
+figure_dir <- file.path(result_dir, "figures")
+
+# 3. Samples and conditions
+sample_cols <- c("WD1", "WD2", "WD3", "Ext1", "Ext2", "Ext3", "Ret-Ext1", "Ret-Ext2", "Ret-Ext3")
+metadata <- data.frame(
+  pool_id = sample_cols,
+  source_sample_id = c("Con1", "Con2", "Con3", "Ext1", "Ext2", "Ext3", "Ret_ext1", "Ret_ext2", "Ret_ext3"),
+  model = rep("Rat IL", 9L),
+  condition = factor(rep(c("WD", "Ext", "Ret-Ext"), each = 3L), levels = c("WD", "Ext", "Ret-Ext")),
+  rats_per_pool = rep(5L, 9L), stringsAsFactors = FALSE)
+
+# 6. Analysis and output
 # Summarize the Ext and Ret-Ext conditions from the same joint neuronal model.
-# Usage: Rscript summarize_joint_cellchat.R RUN_ROOT
 suppressPackageStartupMessages(library(CellChat))
-args <- commandArgs(trailingOnly = TRUE)
-if (length(args) != 1L) stop("Usage: Rscript summarize_joint_cellchat.R RUN_ROOT")
-root <- normalizePath(args[1], mustWork = TRUE)
+root <- normalizePath(result_dir, mustWork = TRUE)
 model_dir <- file.path(root, "06_CellChat")
 out <- file.path(model_dir, "manuscript_tables")
 dir.create(out, recursive = TRUE, showWarnings = FALSE)

@@ -1,17 +1,34 @@
-#!/usr/bin/env Rscript
-if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
-  cat("Usage: Rscript figures/render_major_markers.R SIX_CLASS_OBJECT.rds OUTPUT_DIR\n")
-  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
-  quit(save = "no", status = 0L)
-}
+# render major markers
 
+# 1. Packages
+library(Seurat)
+library(SeuratObject, include.only = character())
+library(ggplot2)
+library(ggrepel, include.only = character())
+library(patchwork, include.only = character())
+library(ragg, include.only = character())
+library(svglite, include.only = character())
+
+# 2. Paths
+work_dir <- "/path/to/work"
+input_file <- file.path(work_dir, "stage1/05_six_class_review/global_celltype_six_class.rds")
+figure_dir <- file.path(work_dir, "major_marker_figures")
+result_dir <- figure_dir
+
+# 3. Samples and conditions
+sample_cols <- c("WD1", "WD2", "WD3", "Ext1", "Ext2", "Ext3", "Ret-Ext1", "Ret-Ext2", "Ret-Ext3")
+metadata <- data.frame(
+  pool_id = sample_cols,
+  source_sample_id = c("Con1", "Con2", "Con3", "Ext1", "Ext2", "Ext3", "Ret_ext1", "Ret_ext2", "Ret_ext3"),
+  model = rep("Rat IL", 9L),
+  condition = factor(rep(c("WD", "Ext", "Ret-Ext"), each = 3L), levels = c("WD", "Ext", "Ret-Ext")),
+  rats_per_pool = rep(5L, 9L), stringsAsFactors = FALSE)
+
+# 6. Analysis and output
 # Render the manuscript global UMAP, major-class marker dots and marker feature panels.
-# Usage: Rscript render_major_markers.R SIX_CLASS_OBJECT.rds OUTPUT_DIR
 suppressPackageStartupMessages({library(Seurat); library(ggplot2); library(grid); library(scattermore)})
-args <- commandArgs(trailingOnly = TRUE)
-if (length(args) != 2L) stop("Usage: Rscript render_major_markers.R SIX_CLASS_OBJECT.rds OUTPUT_DIR")
-obj <- readRDS(args[1])
-out <- args[2]
+obj <- readRDS(input_file)
+out <- figure_dir
 dir.create(out, recursive = TRUE, showWarnings = FALSE)
 stems <- c("global_celltype_umap", "major_marker_dotplot", "major_marker_feature_umap")
 if (any(file.exists(outer(file.path(out, stems), c(".pdf", ".png", ".svg"), paste0))) ||

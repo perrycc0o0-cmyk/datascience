@@ -1,12 +1,26 @@
 """Build the excitatory IEG-high gene-category membership network."""
 
-import argparse
 import csv
 import json
 import math
 from collections import defaultdict
 from pathlib import Path
 
+
+# Paths
+work_dir = Path("/path/to/work")
+deg_dir = work_dir / "deseq2"
+gsea_dir = work_dir / "gsea"
+result_dir = work_dir / "gene_category_network"
+figure_dir = work_dir / "network_figures"
+
+# Samples and conditions
+sample_cols = ["WD1", "WD2", "WD3", "Ext1", "Ext2", "Ext3", "Ret-Ext1", "Ret-Ext2", "Ret-Ext3"]
+metadata = [dict(pool_id=p, model="Rat IL", condition=c, rats_per_pool=5)
+            for p, c in zip(sample_cols, ["WD"] * 3 + ["Ext"] * 3 + ["Ret-Ext"] * 3)]
+
+# Pathway category definitions
+network_categories = [{'category_id': 'C1', 'category_name': 'Secretory / dense-core vesicle programs', 'pathway_ID': 'GO:0098992'}, {'category_id': 'C1', 'category_name': 'Secretory / dense-core vesicle programs', 'pathway_ID': 'GO:0031045'}, {'category_id': 'C1', 'category_name': 'Secretory / dense-core vesicle programs', 'pathway_ID': 'GO:0030141'}, {'category_id': 'C2', 'category_name': 'mTOR signaling', 'pathway_ID': 'rno04150'}, {'category_id': 'C3', 'category_name': 'Synaptic organization / axon guidance', 'pathway_ID': 'GO:0050808'}, {'category_id': 'C3', 'category_name': 'Synaptic organization / axon guidance', 'pathway_ID': 'rno04360'}, {'category_id': 'C4', 'category_name': 'Neurotransmitter / receptor signaling', 'pathway_ID': 'rno04725'}, {'category_id': 'C4', 'category_name': 'Neurotransmitter / receptor signaling', 'pathway_ID': 'rno04080'}, {'category_id': 'C4', 'category_name': 'Neurotransmitter / receptor signaling', 'pathway_ID': 'rno04724'}, {'category_id': 'C5', 'category_name': 'Dopamine response / receptor signaling', 'pathway_ID': 'GO:1903351'}, {'category_id': 'C5', 'category_name': 'Dopamine response / receptor signaling', 'pathway_ID': 'GO:1903350'}, {'category_id': 'C5', 'category_name': 'Dopamine response / receptor signaling', 'pathway_ID': 'GO:0007212'}, {'category_id': 'C6', 'category_name': 'Drug-associated response programs', 'pathway_ID': 'GO:0097306'}, {'category_id': 'C6', 'category_name': 'Drug-associated response programs', 'pathway_ID': 'rno05032'}]
 
 def read_table(path):
     with path.open(encoding="utf-8-sig", newline="") as handle:
@@ -29,17 +43,12 @@ def direction(row):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("deseq2_output_dir", type=Path)
-    parser.add_argument("gsea_output_dir", type=Path)
-    parser.add_argument("output_dir", type=Path)
-    args = parser.parse_args()
     key = "Excitatory__RetExt_vs_Ext"
-    de = read_table(args.deseq2_output_dir / "datasets" / key / "tables" / "ALL_genes.csv")
-    ranks = read_table(args.gsea_output_dir / "source_data" / f"{key}_ranked_genes.csv")
-    tests = read_table(args.gsea_output_dir / "tables" / f"{key}_P005_displayed_GSEA.csv")
-    membership = read_table(args.gsea_output_dir / "source_data" / "union_gene_set_membership.csv")
-    config = read_table(Path(__file__).resolve().parent / "config" / "network_categories.csv")
+    de = read_table(deg_dir / "datasets" / key / "tables" / "ALL_genes.csv")
+    ranks = read_table(gsea_dir / "source_data" / f"{key}_ranked_genes.csv")
+    tests = read_table(gsea_dir / "tables" / f"{key}_P005_displayed_GSEA.csv")
+    membership = read_table(gsea_dir / "source_data" / "union_gene_set_membership.csv")
+    config = network_categories
 
     pathways = {row["ID"]: row for row in tests}
     if set(pathways) != {row["pathway_ID"] for row in config} or not all(
@@ -128,7 +137,7 @@ def main():
                            P=row["pvalue"], BH=row["padj"], ENTREZID=mapped["ENTREZID"] if mapped else "",
                            categories=";".join(memberships), included=bool(memberships), status=status))
 
-    out = args.output_dir
+    out = result_dir
     if out.exists() and any(out.iterdir()):
         raise ValueError(f"Choose an empty output directory: {out}")
     out.mkdir(parents=True, exist_ok=True)
@@ -147,5 +156,4 @@ def main():
     (out / "network_summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
 
 
-if __name__ == "__main__":
-    main()
+main()

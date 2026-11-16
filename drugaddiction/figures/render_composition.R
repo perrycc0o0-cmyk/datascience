@@ -1,18 +1,32 @@
-#!/usr/bin/env Rscript
-if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
-  cat("Usage: Rscript figures/render_composition.R GLOBAL_ANNOTATION.csv.gz NEURON_METADATA.csv OUTPUT_DIR\n")
-  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
-  quit(save = "no", status = 0L)
-}
+# render composition
 
+# 1. Packages
+library(ggplot2)
+library(ragg, include.only = character())
+library(svglite, include.only = character())
+
+# 2. Paths
+work_dir <- "/path/to/work"
+global_annotation <- file.path(work_dir, "stage1/05_six_class_review/source_data/global_cell_annotations_UMAP.csv.gz")
+neuron_metadata <- file.path(work_dir, "stage3/01_inputs/neuron_metadata.csv")
+figure_dir <- file.path(work_dir, "composition_figures")
+result_dir <- figure_dir
+
+# 3. Samples and conditions
+sample_cols <- c("WD1", "WD2", "WD3", "Ext1", "Ext2", "Ext3", "Ret-Ext1", "Ret-Ext2", "Ret-Ext3")
+metadata <- data.frame(
+  pool_id = sample_cols,
+  source_sample_id = c("Con1", "Con2", "Con3", "Ext1", "Ext2", "Ext3", "Ret_ext1", "Ret_ext2", "Ret_ext3"),
+  model = rep("Rat IL", 9L),
+  condition = factor(rep(c("WD", "Ext", "Ret-Ext"), each = 3L), levels = c("WD", "Ext", "Ret-Ext")),
+  rats_per_pool = rep(5L, 9L), stringsAsFactors = FALSE)
+
+# 6. Analysis and output
 # Render condition-pooled descriptive composition of major classes and IEG-high subtypes.
-# Usage: Rscript render_composition.R GLOBAL_ANNOTATION.csv.gz NEURON_METADATA.csv OUTPUT_DIR
 suppressPackageStartupMessages({library(ggplot2); library(grid)})
-args <- commandArgs(trailingOnly = TRUE)
-if (length(args) != 3L) stop("Usage: Rscript render_composition.R GLOBAL_ANNOTATION.csv.gz NEURON_METADATA.csv OUTPUT_DIR")
-global <- read.csv(args[1])
-neuron <- read.csv(args[2])
-out <- args[3]
+global <- read.csv(global_annotation)
+neuron <- read.csv(neuron_metadata)
+out <- figure_dir
 dir.create(out, recursive = TRUE, showWarnings = FALSE)
 stems <- c("major_class_composition", "excitatory_ieghigh_composition", "inhibitory_ieghigh_composition")
 if (any(file.exists(outer(file.path(out, stems),

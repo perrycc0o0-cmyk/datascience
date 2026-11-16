@@ -1,21 +1,34 @@
-#!/usr/bin/env Rscript
-if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
-  cat("Usage: Rscript figures/render_proportions.R NEURON_METADATA.csv EXC_STATS.csv INH_STATS.csv OUTPUT_DIR\n")
-  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
-  quit(save = "no", status = 0L)
-}
+# render proportions
 
+# 1. Packages
+library(ggplot2)
+library(ragg, include.only = character())
+library(svglite, include.only = character())
+
+# 2. Paths
+work_dir <- "/path/to/work"
+neuron_metadata <- file.path(work_dir, "stage3/01_inputs/neuron_metadata.csv")
+exc_statistics <- "/path/to/excitatory_statistics.csv"
+inh_statistics <- "/path/to/inhibitory_statistics.csv"
+figure_dir <- file.path(work_dir, "proportion_figures")
+result_dir <- figure_dir
+
+# 3. Samples and conditions
+sample_cols <- c("WD1", "WD2", "WD3", "Ext1", "Ext2", "Ext3", "Ret-Ext1", "Ret-Ext2", "Ret-Ext3")
+metadata <- data.frame(
+  pool_id = sample_cols,
+  source_sample_id = c("Con1", "Con2", "Con3", "Ext1", "Ext2", "Ext3", "Ret_ext1", "Ret_ext2", "Ret_ext3"),
+  model = rep("Rat IL", 9L),
+  condition = factor(rep(c("WD", "Ext", "Ret-Ext"), each = 3L), levels = c("WD", "Ext", "Ret-Ext")),
+  rats_per_pool = rep(5L, 9L), stringsAsFactors = FALSE)
+
+# 6. Analysis and output
 # Draw observed pooled-sample percentages using an external, finalized statistics table.
-# Usage: Rscript render_proportions.R NEURON_METADATA.csv EXC_STATS.csv INH_STATS.csv OUTPUT_DIR
 suppressPackageStartupMessages({library(ggplot2); library(grid)})
-args <- commandArgs(trailingOnly = TRUE)
-if (length(args) != 4L) {
-  stop("Usage: Rscript render_proportions.R NEURON_METADATA.csv EXC_STATS.csv INH_STATS.csv OUTPUT_DIR")
-}
-metadata <- read.csv(args[1], fileEncoding = "UTF-8-BOM")
+metadata <- read.csv(neuron_metadata, fileEncoding = "UTF-8-BOM")
 stopifnot(all(c("Cell", "pool_id", "condition", "neuron_type", "subtype", "IEGhigh") %in% names(metadata)),
           !anyDuplicated(metadata$Cell), is.logical(metadata$IEGhigh), !anyNA(metadata$IEGhigh))
-out <- args[4]
+out <- figure_dir
 dir.create(out, recursive = TRUE, showWarnings = FALSE)
 stems <- c("excitatory_recruitment", "inhibitory_recruitment")
 if (any(file.exists(outer(file.path(out, stems),
@@ -89,7 +102,7 @@ for (lineage in names(subtypes)) {
   inhibitory <- lineage == "Inhibitory"
   ord <- subtypes[[lineage]]
   z <- observed_points(metadata, lineage)
-  st <- read_stats(args[if (inhibitory) 3 else 2], ord)
+  st <- read_stats(if (inhibitory) inh_statistics else exc_statistics, ord)
   sig <- subset(st, is.finite(BH_adjusted_P) & BH_adjusted_P < .05)
   if (!nrow(z) || !all(sig$subtype %in% z$subtype)) stop("A displayed result has no observed pool points.")
   ranges <- do.call(rbind, lapply(split(z, list(z$subtype, z$condition), drop = TRUE), function(t) {

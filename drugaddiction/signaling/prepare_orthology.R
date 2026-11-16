@@ -1,15 +1,27 @@
-#!/usr/bin/env Rscript
-if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
-  cat("Usage: Rscript signaling/prepare_orthology.R --root STAGE3_DIR\n")
-  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
-  quit(save = "no", status = 0L)
-}
+# prepare orthology
 
+# 1. Packages
+library(httr2, include.only = character())
+library(xml2, include.only = character())
+library(jsonlite, include.only = character())
+
+# 2. Paths
+work_dir <- "/path/to/work"
+result_dir <- file.path(work_dir, "stage3")
+figure_dir <- file.path(result_dir, "figures")
+
+# 3. Samples and conditions
+sample_cols <- c("WD1", "WD2", "WD3", "Ext1", "Ext2", "Ext3", "Ret-Ext1", "Ret-Ext2", "Ret-Ext3")
+metadata <- data.frame(
+  pool_id = sample_cols,
+  source_sample_id = c("Con1", "Con2", "Con3", "Ext1", "Ext2", "Ext3", "Ret_ext1", "Ret_ext2", "Ret_ext3"),
+  model = rep("Rat IL", 9L),
+  condition = factor(rep(c("WD", "Ext", "Ret-Ext"), each = 3L), levels = c("WD", "Ext", "Ret-Ext")),
+  rats_per_pool = rep(5L, 9L), stringsAsFactors = FALSE)
+
+# 6. Analysis and output
 # Freeze public Ensembl116 rat-human homology independently of model inference.
-args <- commandArgs(trailingOnly = TRUE)
-i <- match("--root", args)
-if (is.na(i) || i == length(args)) stop("Usage: Rscript prepare_orthology.R --root RUN_ROOT")
-root <- normalizePath(args[i + 1L], mustWork = TRUE)
+root <- normalizePath(result_dir, mustWork = TRUE)
 out <- file.path(root, "06_CellChat", "orthology")
 if (file.exists(file.path(out, "complete.json"))) stop("A frozen orthology export already exists")
 dir.create(out, recursive = TRUE, showWarnings = FALSE)

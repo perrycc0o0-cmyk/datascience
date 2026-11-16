@@ -1,12 +1,123 @@
-#!/usr/bin/env Rscript
-if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
-  cat("Usage: Rscript upstream/stage2/01_recluster_neurons.R --root STAGE2_DIR [--stage1 STAGE1_DIR] [--config JSON] [--fontconfig-file FILE]\n")
-  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
-  quit(save = "no", status = 0L)
-}
-.upstream_entry <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1L])
-source(file.path(dirname(dirname(normalizePath(.upstream_entry, mustWork = TRUE))), "script_io.R"))
+# 01 recluster neurons
 
+# 1. Packages
+library(jsonlite, include.only = character())
+library(Seurat, include.only = character())
+library(SeuratObject, include.only = character())
+library(Matrix, include.only = character())
+library(harmony, include.only = character())
+library(uwot, include.only = character())
+library(future, include.only = character())
+
+# 2. Paths
+input_dir <- "/path/to/matrices"
+work_dir <- "/path/to/work"
+result_dir <- file.path(work_dir, "stage2")
+figure_dir <- result_dir
+fontconfig_file <- NULL
+script_path <- "/path/to/01_recluster_neurons.R"
+stage1_dir <- file.path(work_dir, "stage1")
+
+# 3. Samples and conditions
+sample_cols <- c("WD1", "WD2", "WD3", "Ext1", "Ext2", "Ext3", "Ret-Ext1", "Ret-Ext2", "Ret-Ext3")
+metadata <- data.frame(
+  pool_id = sample_cols,
+  source_sample_id = c("Con1", "Con2", "Con3", "Ext1", "Ext2", "Ext3", "Ret_ext1", "Ret_ext2", "Ret_ext3"),
+  model = rep("Rat IL", 9L),
+  condition = factor(rep(c("WD", "Ext", "Ret-Ext"), each = 3L), levels = c("WD", "Ext", "Ret-Ext")),
+  rats_per_pool = rep(5L, 9L), stringsAsFactors = FALSE)
+
+# 4. Parameters and marker definitions
+neuron_settings <- list(
+  `schema_version` = "1.0",
+  `run_id` = "20261101_Manuscript_matched_stage2_01",
+  `stage_gate` = "neuron_subtype_review",
+  `source_class_column` = "major_class_six",
+  `keep_previously_forced_clusters` = TRUE,
+  `do_not_refilter` = TRUE,
+  `analysis_seed` = 42L,
+  `runtime` = list(
+    `threads` = 4L,
+    `blas_threads` = 1L,
+    `r_libraries` = list(),
+    `fontconfig_file` = NULL,
+    `font_family` = "Arial"
+  ),
+  `processing` = list(
+    `assay` = "RNA",
+    `counts_basis` = "Existing SoupX-corrected integer UMI counts; original observed counts retained separately",
+    `normalization` = "LogNormalize",
+    `scale_factor` = 10000L,
+    `hvg_method` = "vst",
+    `n_hvg` = 2000L,
+    `scale_vars_to_regress` = list(),
+    `pca_components_max` = 100L,
+    `harmony_pca_dimensions_max` = 30L,
+    `harmony_group_by` = "sample_id",
+    `harmony_max_iter` = 10L,
+    `harmony_project_dim` = FALSE,
+    `neighbor_harmony_dimensions_max` = 19L,
+    `clustering_algorithm` = 1L,
+    `resolution` = 0.5,
+    `umap_engine` = "uwot::umap",
+    `umap_metric` = "cosine",
+    `umap_repulsion_strength` = 1L,
+    `umap_sgd_threads` = 1L
+  ),
+  `lineages` = list(
+    list(
+      `id` = "Exc",
+      `source_class` = "Excitatory",
+      `expected_nuclei` = 62991L,
+      `output_directory` = "01_Exc",
+      `neighbors_k` = 20L,
+      `umap_n_neighbors` = 10L,
+      `umap_min_dist` = 0.8,
+      `umap_spread` = 6L
+    ),
+    list(
+      `id` = "Inh",
+      `source_class` = "Inhibitory",
+      `expected_nuclei` = 21693L,
+      `output_directory` = "02_Inh",
+      `neighbors_k` = 30L,
+      `umap_n_neighbors` = 30L,
+      `umap_min_dist` = 0.3,
+      `umap_spread` = 1L
+    )
+  ),
+  `annotation_marker_discovery` = list(
+    `test` = "wilcox",
+    `min_pct` = 0.25,
+    `logfc_threshold` = 0.25,
+    `max_cells_per_ident` = 1000L,
+    `only_pos` = FALSE,
+    `return_thresh` = 1L,
+    `purpose` = "Annotation markers only, not between-condition DE"
+  ),
+  `parent_stage1_root` = NULL,
+  `input_rds` = NULL
+)
+neuron_settings$parent_stage1_root <- stage1_dir
+neuron_settings$input_rds <- file.path(stage1_dir, "05_six_class_review", "global_celltype_six_class.rds")
+neuron_settings$runtime["fontconfig_file"] <- list(fontconfig_file)
+
+# 5. Helper functions
+save_settings <- function(value, filename) {
+  path <- file.path(result_dir, "provenance", filename)
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  if (file.exists(path)) {
+    previous <- jsonlite::read_json(path, simplifyVector = FALSE)
+    if (!isTRUE(all.equal(previous, value, tolerance = 0))) stop("Existing settings differ: ", path)
+  } else {
+    jsonlite::write_json(value, path, pretty = TRUE, auto_unbox = TRUE, null = "null", digits = 17)
+  }
+  path
+}
+
+# 6. Analysis and output
+dir.create(result_dir, recursive = TRUE, showWarnings = FALSE)
+config_snapshot <- save_settings(neuron_settings, "neuron_settings.json")
 # Independently recompute Exc/Inh latent spaces from the approved stage-1 cells.
 # No new QC, cell exclusion, subtype assignment or condition comparison is performed.
 
@@ -50,7 +161,7 @@ s2_write_gz_csv <- function(tab, path) {
 
 run_stage2_recluster <- function(root, config = file.path(root, "config", "stage2_config.json")) {
   root <- normalizePath(root, mustWork = TRUE)
-  cfg <- jsonlite::read_json(config, simplifyVector = FALSE)
+  cfg <- neuron_settings
   libs <- unlist(cfg$runtime$r_libraries, use.names = FALSE)
   .libPaths(unique(c(libs, .libPaths())))
   required <- c("Seurat", "SeuratObject", "Matrix", "harmony", "uwot", "jsonlite", "future")
@@ -123,7 +234,7 @@ run_stage2_recluster <- function(root, config = file.path(root, "config", "stage
     s2_json(runtime, file.path(root, "provenance", "runtime.json"))
     s2_json(list(input_rds = input, input_bytes = input_before$size, input_mtime = as.character(input_before$mtime),
       parent_nuclei = ncol(parent), config_md5 = unname(tools::md5sum(config)),
-      script_md5 = unname(tools::md5sum(upstream_script("stage2", "01_recluster_neurons.R")))),
+      script_md5 = unname(tools::md5sum(script_path))),
       file.path(root, "provenance", "input_provenance.json"))
     summaries <- list()
     for (spec in cfg$lineages) {
@@ -292,10 +403,4 @@ run_stage2_recluster <- function(root, config = file.path(root, "config", "stage
   })
 }
 
-if (sys.nframe() == 0L && Sys.getenv("STAGE2_SOURCE_ONLY") != "1") {
-  a <- commandArgs(trailingOnly = TRUE)
-  if (length(a) < 2L || a[1L] != "--root") stop("Usage: Rscript 01_recluster_neurons.R --root NEW_STAGE2_ROOT [--stage1 STAGE1_DIRECTORY] [--config CONFIG]")
-  if (!requireNamespace("jsonlite", quietly = TRUE)) stop("jsonlite is required to read configuration")
-  cp <- upstream_neuron_configuration(upstream_work_directory(a[2L]), upstream_option("--config"))
-  run_stage2_recluster(a[2L], cp)
-}
+run_stage2_recluster(result_dir, config_snapshot)

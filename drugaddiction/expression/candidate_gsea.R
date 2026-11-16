@@ -1,27 +1,317 @@
-#!/usr/bin/env Rscript
-if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
-  cat("Usage: Rscript expression/candidate_gsea.R DESEQ2_DIR EXC_SYMBOL_ENTREZ.csv INH_SYMBOL_ENTREZ.csv PATHWAY_MEMBERSHIP.csv OUTPUT_DIR\n")
-  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
-  quit(save = "no", status = 0L)
+# candidate gsea
+
+# 1. Packages
+library(fgsea, include.only = character())
+
+# 2. Paths
+work_dir <- "/path/to/work"
+deg_dir <- file.path(work_dir, "deseq2")
+exc_mapping <- "/path/to/references/excitatory_symbol_entrez.csv"
+inh_mapping <- "/path/to/references/inhibitory_symbol_entrez.csv"
+pathway_membership <- "/path/to/references/rat_candidate_pathway_membership.csv"
+result_dir <- file.path(work_dir, "gsea")
+figure_dir <- file.path(result_dir, "figures")
+
+# 3. Samples and conditions
+sample_cols <- c("WD1", "WD2", "WD3", "Ext1", "Ext2", "Ext3", "Ret-Ext1", "Ret-Ext2", "Ret-Ext3")
+metadata <- data.frame(
+  pool_id = sample_cols,
+  source_sample_id = c("Con1", "Con2", "Con3", "Ext1", "Ext2", "Ext3", "Ret_ext1", "Ret_ext2", "Ret_ext3"),
+  model = rep("Rat IL", 9L),
+  condition = factor(rep(c("WD", "Ext", "Ret-Ext"), each = 3L), levels = c("WD", "Ext", "Ret-Ext")),
+  rats_per_pool = rep(5L, 9L), stringsAsFactors = FALSE)
+
+# 4. Parameters and marker definitions
+candidate_pathways <- data.frame(
+  `candidate_order` = c(
+    1L,
+    2L,
+    3L,
+    4L,
+    5L,
+    6L,
+    7L,
+    8L,
+    9L,
+    10L,
+    11L,
+    12L,
+    13L,
+    14L,
+    15L,
+    16L,
+    17L,
+    18L,
+    19L,
+    20L,
+    21L,
+    22L,
+    23L,
+    24L,
+    25L,
+    26L,
+    27L,
+    28L,
+    29L,
+    30L,
+    31L,
+    32L,
+    33L,
+    34L,
+    35L,
+    36L,
+    37L,
+    38L,
+    39L,
+    40L,
+    41L,
+    42L,
+    43L
+  ),
+  `ID` = c(
+    "GO:0033363",
+    "GO:0045055",
+    "GO:0002790",
+    "GO:0099539",
+    "GO:0007218",
+    "GO:0030141",
+    "GO:0031045",
+    "GO:0099590",
+    "GO:0043161",
+    "rno03050",
+    "rno04024",
+    "rno04728",
+    "rno04723",
+    "rno05031",
+    "rno04720",
+    "rno04010",
+    "rno04722",
+    "rno04020",
+    "rno04727",
+    "rno04150",
+    "rno05030",
+    "rno04730",
+    "R-RNO-399719",
+    "rno04810",
+    "GO:0007015",
+    "GO:0050808",
+    "GO:0099173",
+    "rno05032",
+    "rno05034",
+    "rno04724",
+    "rno04726",
+    "rno04080",
+    "rno04360",
+    "GO:0035094",
+    "GO:0097305",
+    "GO:0097306",
+    "GO:0098992",
+    "GO:0007212",
+    "GO:1903351",
+    "GO:1903350",
+    "rno05033",
+    "rno04725",
+    "GO:0043278"
+  ),
+  `Description` = c(
+    "Secretory granule organization",
+    "Regulated exocytosis",
+    "Peptide secretion",
+    "Neuropeptide secretion from presynapse",
+    "Neuropeptide signaling pathway",
+    "Secretory granule",
+    "Dense core granule",
+    "Neurotransmitter receptor internalization",
+    "Proteasome-mediated ubiquitin-dependent protein catabolic process",
+    "Proteasome",
+    "cAMP signaling pathway",
+    "Dopaminergic synapse",
+    "Retrograde endocannabinoid signaling",
+    "Amphetamine addiction",
+    "Long-term potentiation",
+    "MAPK signaling pathway",
+    "Neurotrophin signaling pathway",
+    "Calcium signaling pathway",
+    "GABAergic synapse",
+    "mTOR signaling pathway",
+    "Cocaine addiction",
+    "Long-term depression",
+    "Trafficking of AMPA receptors",
+    "Regulation of actin cytoskeleton",
+    "Actin filament organization",
+    "Synapse organization",
+    "Postsynapse organization",
+    "Morphine addiction",
+    "Alcoholism",
+    "Glutamatergic synapse",
+    "Serotonergic synapse",
+    "Neuroactive ligand-receptor interaction",
+    "Axon guidance",
+    "response to nicotine",
+    "response to alcohol",
+    "cellular response to alcohol",
+    "neuronal dense core vesicle",
+    "G protein-coupled dopamine receptor signaling pathway",
+    "cellular response to dopamine",
+    "response to dopamine",
+    "Nicotine addiction",
+    "Cholinergic synapse",
+    "response to morphine"
+  ),
+  stringsAsFactors = FALSE, check.names = FALSE
+)
+
+# 5. Helper functions
+# Input checks and native DESeq2 calculations for the expression workflows.
+require_packages <- function(packages) {
+  absent <- packages[!vapply(packages, requireNamespace, logical(1), quietly = TRUE)]
+  if (length(absent)) stop("Install the required R packages: ", paste(absent, collapse = ", "))
 }
 
-# Preranked GSEA of the fixed rat candidate pathway panel.
-script <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])
-script_dir <- dirname(normalizePath(script, mustWork = TRUE))
-source(file.path(script_dir, "workflow_helpers.R"))
-args <- commandArgs(TRUE)
-if (length(args) != 5L) {
-  stop(paste("Usage: Rscript candidate_gsea.R <deseq2_output_dir>",
-             "<excitatory_symbol_entrez.csv> <inhibitory_symbol_entrez.csv>",
-             "<frozen_pathway_membership.csv> <output_dir>"))
+limit_threads <- function() {
+  Sys.setenv(OMP_NUM_THREADS = "1", OPENBLAS_NUM_THREADS = "1",
+             MKL_NUM_THREADS = "1", OMP_THREAD_LIMIT = "1")
+  if (requireNamespace("RhpcBLASctl", quietly = TRUE)) {
+    RhpcBLASctl::blas_set_num_threads(1L)
+  }
 }
+
+new_output_dir <- function(path) {
+  if (dir.exists(path) && length(list.files(path, all.files = TRUE, no.. = TRUE))) {
+    stop("Choose an empty output directory: ", path)
+  }
+  dir.create(path, recursive = TRUE, showWarnings = FALSE)
+  normalizePath(path, mustWork = TRUE)
+}
+
+read_table <- function(path) {
+  read.csv(path, stringsAsFactors = FALSE, check.names = FALSE,
+           fileEncoding = "UTF-8-BOM")
+}
+
+write_table <- function(x, path) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  write.csv(x, path, row.names = FALSE, na = "NA", fileEncoding = "UTF-8")
+}
+
+write_session <- function(out) {
+  writeLines(capture.output(sessionInfo()), file.path(out, "session_info.txt"))
+}
+
+pool_ids <- sample_cols
+pool_conditions <- setNames(as.character(metadata$condition), sample_cols)
+
+read_ieg_payload <- function(path, neuronal_class) {
+  require_packages("Matrix")
+  q <- readRDS(path)
+  stopifnot(all(c("counts", "metadata", "gene_annotation") %in% names(q)))
+  x <- q$counts
+  md <- q$metadata
+  ann <- q$gene_annotation
+  stopifnot(inherits(x, "sparseMatrix"),
+            all(c("Cell", "pool_id", "condition", "IEGhigh") %in% names(md)),
+            all(c("seurat_feature", "gene_id", "original_symbol") %in% names(ann)),
+            identical(colnames(x), as.character(md$Cell)),
+            identical(rownames(x), as.character(ann$seurat_feature)),
+            !anyDuplicated(md$Cell), !anyDuplicated(rownames(x)),
+            all(md$IEGhigh), setequal(md$pool_id, pool_ids),
+            identical(as.character(md$condition), unname(pool_conditions[as.character(md$pool_id)])),
+            all(is.finite(x@x)), all(x@x >= 0), all(x@x == round(x@x)))
+  if ("neuron_type" %in% names(md)) stopifnot(all(md$neuron_type == neuronal_class))
+  q
+}
+
+aggregate_pools <- function(q) {
+  group <- Matrix::sparseMatrix(i = seq_len(ncol(q$counts)),
+                               j = match(q$metadata$pool_id, pool_ids),
+                               x = 1, dims = c(ncol(q$counts), length(pool_ids)))
+  counts <- as.matrix(q$counts %*% group)
+  stopifnot(all(is.finite(counts)), all(counts >= 0), all(counts <= .Machine$integer.max))
+  dimnames(counts) <- list(rownames(q$counts), pool_ids)
+  storage.mode(counts) <- "integer"
+  counts
+}
+
+make_pool_metadata <- function(pools, levels) {
+  data.frame(pool_id = pools, condition = factor(unname(pool_conditions[pools]), levels),
+             row.names = pools)
+}
+
+expression_filter <- function(counts, metadata) {
+  unname(edgeR::filterByExpr(edgeR::DGEList(counts, group = metadata$condition),
+                            design = model.matrix(~ condition, metadata)))
+}
+
+fit_native_deseq <- function(counts, metadata, eligible, numerator, denominator,
+                             allow_convergence_retry = FALSE,
+                             contrast = c("condition", numerator, denominator)) {
+  stopifnot(identical(colnames(counts), rownames(metadata)), any(eligible),
+            length(eligible) == nrow(counts), !anyNA(eligible))
+  dds <- DESeq2::DESeqDataSetFromMatrix(counts[eligible, , drop = FALSE],
+                                       metadata, design = ~ condition)
+  dds <- DESeq2::DESeq(dds, test = "Wald", fitType = "parametric", sfType = "ratio",
+                       betaPrior = FALSE, minReplicatesForReplace = 7L,
+                       quiet = TRUE, parallel = FALSE)
+  initial <- S4Vectors::mcols(dds)$betaConv
+  retried <- any(is.na(initial) | !initial)
+  if (retried && allow_convergence_retry) {
+    dds <- DESeq2::nbinomWaldTest(dds, betaPrior = FALSE, maxit = 1000, quiet = TRUE)
+  }
+  stopifnot(all(S4Vectors::mcols(dds)$betaConv),
+            all(DESeq2::counts(dds) == counts[eligible, , drop = FALSE]),
+            !("replaceCounts" %in% SummarizedExperiment::assayNames(dds)))
+  res <- DESeq2::results(dds, contrast = contrast,
+                         alpha = 0.05, independentFiltering = TRUE,
+                         pAdjustMethod = "BH", parallel = FALSE)
+  threshold <- as.numeric(S4Vectors::metadata(res)$filterThreshold)
+  family <- is.finite(res$pvalue) & res$baseMean >= threshold
+  stopifnot(length(threshold) == 1L, is.finite(threshold),
+            identical(unname(is.finite(res$padj)), unname(family)))
+  if (any(family)) {
+    stopifnot(all(abs(res$padj[family] - p.adjust(res$pvalue[family], "BH")) < 1e-12))
+  }
+  list(model = dds, result = res, filter_threshold = threshold,
+       convergence_retry = retried && allow_convergence_retry)
+}
+
+native_de_table <- function(fit, counts, annotation, eligible, neuronal_class,
+                            numerator, denominator) {
+  r <- as.data.frame(fit$result)
+  idx <- match(rownames(counts), rownames(r))
+  mc <- S4Vectors::mcols(fit$model)
+  cooks <- SummarizedExperiment::assays(fit$model)[["cooks"]]
+  max_cooks <- apply(cooks, 1, function(x) if (any(is.finite(x))) max(x[is.finite(x)]) else NA_real_)
+  z <- data.frame(
+    gene = rownames(counts), gene_id = annotation$gene_id,
+    original_symbol = annotation$original_symbol, eligible = eligible,
+    tested = eligible & is.finite(r$pvalue[idx]),
+    in_BH_family = eligible & is.finite(r$padj[idx]),
+    baseMean = r$baseMean[idx], log2FoldChange = r$log2FoldChange[idx],
+    lfcSE = r$lfcSE[idx], stat = r$stat[idx], pvalue = r$pvalue[idx],
+    padj = r$padj[idx], maxCooks = max_cooks[idx], betaConv = mc$betaConv[idx],
+    neuron_type = neuronal_class, numerator = numerator, denominator = denominator,
+    method = "DESeq2", n_pools = ncol(counts), n_per_condition = 3L,
+    independentFiltering = TRUE, alpha = 0.05, stringsAsFactors = FALSE)
+  z$status <- ifelse(!eligible, "filtered_low_expression_before_fit",
+                     ifelse(!z$tested, "native_P_withheld",
+                            ifelse(!z$in_BH_family, "independent_filter_low_mean", "tested_with_native_BH")))
+  z$BH_significant <- z$in_BH_family & z$padj < 0.05
+  z$display_DEG <- z$BH_significant & abs(z$log2FoldChange) >= log2(1.15)
+  z$DE_direction <- ifelse(z$display_DEG, ifelse(z$log2FoldChange > 0, "Up", "Down"),
+                           ifelse(z$in_BH_family, "Not significant", "Not in BH family"))
+  z
+}
+
+# 6. Analysis and output
+mapping_files <- c(exc_mapping, inh_mapping)
+# Preranked GSEA of the fixed rat candidate pathway panel.
 limit_threads()
 require_packages("fgsea")
-out <- new_output_dir(args[5])
-candidates <- read_table(file.path(script_dir, "config", "candidate_pathways.csv"))
+out <- new_output_dir(result_dir)
+candidates <- candidate_pathways
 stopifnot(nrow(candidates) == 43L, !anyDuplicated(candidates$ID),
           identical(candidates$candidate_order, seq_len(nrow(candidates))))
-membership <- read_table(args[4])
+membership <- read_table(pathway_membership)
 stopifnot(all(c("ID", "Entrez") %in% names(membership)))
 membership$Entrez <- as.character(membership$Entrez)
 membership <- membership[membership$ID %in% candidates$ID, , drop = FALSE]
@@ -73,10 +363,10 @@ types <- c("Excitatory", "Inhibitory")
 for (i in seq_along(types)) {
   type <- types[i]
   key <- paste0(type, "__RetExt_vs_Ext")
-  de <- read_table(file.path(args[1], "datasets", key, "tables", "ALL_genes.csv"))
+  de <- read_table(file.path(deg_dir, "datasets", key, "tables", "ALL_genes.csv"))
   stopifnot(all(de$neuron_type == type), all(de$numerator == "Ret-Ext"), all(de$denominator == "Ext"),
             all(de$method == "DESeq2"), all(de$n_pools == 6L))
-  mapped <- rank_genes(de, read_table(args[i + 1L]))
+  mapped <- rank_genes(de, read_table(mapping_files[i]))
   rr <- mapped$ranks
   write_table(mapped$audit, file.path(out, "source_data", paste0(type, "_gene_mapping_audit.csv")))
   write_table(rr, file.path(out, "source_data", paste0(key, "_ranked_genes.csv")))

@@ -1,26 +1,190 @@
-#!/usr/bin/env Rscript
-if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
-  cat("Usage: Rscript upstream/stage3/01_prepare_analysis_inputs.R --root STAGE3_DIR [--stage2 STAGE2_DIR] [--config JSON]\n")
-  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
-  quit(save = "no", status = 0L)
-}
-.upstream_entry <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1L])
-source(file.path(dirname(dirname(normalizePath(.upstream_entry, mustWork = TRUE))), "script_io.R"))
+# 01 prepare analysis inputs
 
+# 1. Packages
+library(jsonlite)
+library(SeuratObject)
+library(Matrix)
+library(digest)
+
+# 2. Paths
+input_dir <- "/path/to/matrices"
+work_dir <- "/path/to/work"
+result_dir <- file.path(work_dir, "stage3")
+figure_dir <- result_dir
+fontconfig_file <- NULL
+script_path <- "/path/to/01_prepare_analysis_inputs.R"
+stage1_dir <- file.path(work_dir, "stage1")
+stage2_dir <- file.path(work_dir, "stage2")
+
+# 3. Samples and conditions
+sample_cols <- c("WD1", "WD2", "WD3", "Ext1", "Ext2", "Ext3", "Ret-Ext1", "Ret-Ext2", "Ret-Ext3")
+metadata <- data.frame(
+  pool_id = sample_cols,
+  source_sample_id = c("Con1", "Con2", "Con3", "Ext1", "Ext2", "Ext3", "Ret_ext1", "Ret_ext2", "Ret_ext3"),
+  model = rep("Rat IL", 9L),
+  condition = factor(rep(c("WD", "Ext", "Ret-Ext"), each = 3L), levels = c("WD", "Ext", "Ret-Ext")),
+  rats_per_pool = rep(5L, 9L), stringsAsFactors = FALSE)
+
+# 4. Parameters and marker definitions
+neuron_settings <- list(
+  `schema_version` = "1.0",
+  `run_id` = "20261101_Manuscript_matched_stage2_01",
+  `stage_gate` = "neuron_subtype_review",
+  `source_class_column` = "major_class_six",
+  `keep_previously_forced_clusters` = TRUE,
+  `do_not_refilter` = TRUE,
+  `analysis_seed` = 42L,
+  `runtime` = list(
+    `threads` = 4L,
+    `blas_threads` = 1L,
+    `r_libraries` = list(),
+    `fontconfig_file` = NULL,
+    `font_family` = "Arial"
+  ),
+  `processing` = list(
+    `assay` = "RNA",
+    `counts_basis` = "Existing SoupX-corrected integer UMI counts; original observed counts retained separately",
+    `normalization` = "LogNormalize",
+    `scale_factor` = 10000L,
+    `hvg_method` = "vst",
+    `n_hvg` = 2000L,
+    `scale_vars_to_regress` = list(),
+    `pca_components_max` = 100L,
+    `harmony_pca_dimensions_max` = 30L,
+    `harmony_group_by` = "sample_id",
+    `harmony_max_iter` = 10L,
+    `harmony_project_dim` = FALSE,
+    `neighbor_harmony_dimensions_max` = 19L,
+    `clustering_algorithm` = 1L,
+    `resolution` = 0.5,
+    `umap_engine` = "uwot::umap",
+    `umap_metric` = "cosine",
+    `umap_repulsion_strength` = 1L,
+    `umap_sgd_threads` = 1L
+  ),
+  `lineages` = list(
+    list(
+      `id` = "Exc",
+      `source_class` = "Excitatory",
+      `expected_nuclei` = 62991L,
+      `output_directory` = "01_Exc",
+      `neighbors_k` = 20L,
+      `umap_n_neighbors` = 10L,
+      `umap_min_dist` = 0.8,
+      `umap_spread` = 6L
+    ),
+    list(
+      `id` = "Inh",
+      `source_class` = "Inhibitory",
+      `expected_nuclei` = 21693L,
+      `output_directory` = "02_Inh",
+      `neighbors_k` = 30L,
+      `umap_n_neighbors` = 30L,
+      `umap_min_dist` = 0.3,
+      `umap_spread` = 1L
+    )
+  ),
+  `annotation_marker_discovery` = list(
+    `test` = "wilcox",
+    `min_pct` = 0.25,
+    `logfc_threshold` = 0.25,
+    `max_cells_per_ident` = 1000L,
+    `only_pos` = FALSE,
+    `return_thresh` = 1L,
+    `purpose` = "Annotation markers only, not between-condition DE"
+  ),
+  `parent_stage1_root` = NULL,
+  `input_rds` = NULL
+)
+neuron_settings$parent_stage1_root <- stage1_dir
+neuron_settings$input_rds <- file.path(stage1_dir, "05_six_class_review", "global_celltype_six_class.rds")
+neuron_settings$runtime["fontconfig_file"] <- list(fontconfig_file)
+analysis_settings <- list(
+  `run_id` = "20261101_Manuscript_reanalysis_08",
+  `seed` = 42L,
+  `threads` = 4L,
+  `font` = "Arial",
+  `backend` = "R",
+  `formats` = list(
+    "png",
+    "pdf"
+  ),
+  `expected_counts` = list(
+    `all` = 131480L,
+    `Excitatory` = 62991L,
+    `Inhibitory` = 21693L,
+    `Inh_Etv1` = 8139L,
+    `Inh_Lamp5` = 1085L
+  ),
+  `annotation` = "User-approved six major classes, six Exc subtypes and eight Inh working groups; retain original uncertainty and lineage-conflict flags",
+  `conditions` = list(
+    "WD",
+    "Ext",
+    "Ret-Ext"
+  ),
+  `libraries_per_condition` = 3L,
+  `rats_per_library` = 5L,
+  `IEG_genes` = list(
+    "Arc",
+    "Bdnf",
+    "Btg2",
+    "Fos",
+    "Fosl2",
+    "Homer1",
+    "Npas4",
+    "Nr4a1"
+  ),
+  `IEG_quantile` = 0.95,
+  `IEG_quantile_type` = 7L,
+  `IEG_comparison` = ">=",
+  `IEG_scope` = "within each neuron class across WD,Ext,Ret-Ext, using corrected RNA/data; retain ties",
+  `contrasts` = list(
+    `RetExt_vs_Ext` = list(
+      "Ret-Ext",
+      "Ext"
+    ),
+    `Ext_vs_WD` = list(
+      "Ext",
+      "WD"
+    ),
+    `RetExt_vs_WD` = list(
+      "Ret-Ext",
+      "WD"
+    )
+  ),
+  `base` = NULL,
+  `upstream_stage2` = "stage2"
+)
+analysis_settings$base <- dirname(stage2_dir)
+analysis_settings$upstream_stage2 <- basename(stage2_dir)
+
+# 5. Helper functions
+save_settings <- function(value, filename) {
+  path <- file.path(result_dir, "provenance", filename)
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  if (file.exists(path)) {
+    previous <- jsonlite::read_json(path, simplifyVector = FALSE)
+    if (!isTRUE(all.equal(previous, value, tolerance = 0))) stop("Existing settings differ: ", path)
+  } else {
+    jsonlite::write_json(value, path, pretty = TRUE, auto_unbox = TRUE, null = "null", digits = 17)
+  }
+  path
+}
+
+# 6. Analysis and output
+dir.create(result_dir, recursive = TRUE, showWarnings = FALSE)
+config_snapshot <- save_settings(analysis_settings, "analysis_settings.json")
 # Freeze accepted neuronal labels and expression inputs without changing upstream objects.
-a <- commandArgs(TRUE)
-root_arg <- upstream_option('--root', if (length(a) && !startsWith(a[1L], '--')) a[1L] else NULL)
-out <- upstream_work_directory(root_arg)
-suppressPackageStartupMessages(library(jsonlite))
-c0 <- read_json(upstream_analysis_configuration(out, upstream_option('--config')),simplifyVector=FALSE)
+out <- normalizePath(result_dir, mustWork = TRUE)
+c0 <- analysis_settings
 flat <- function(x) as.character(unlist(x,use.names=FALSE))
 stage2 <- file.path(c0$base,c0$upstream_stage2)
-rt <- read_json(file.path(stage2,'config/stage2_config.json'),simplifyVector=FALSE)$runtime
+rt <- neuron_settings$runtime
 .libPaths(unique(c(flat(rt$r_libraries),.libPaths())))
 Sys.setenv(OMP_NUM_THREADS='4',OMP_THREAD_LIMIT='4',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1')
 suppressPackageStartupMessages({library(SeuratObject);library(Matrix);library(digest)})
-pools <- c(paste0('WD',1:3),paste0('Ext',1:3),paste0('Ret-Ext',1:3))
-cond <- setNames(rep(c('WD','Ext','Ret-Ext'),each=3),pools); ieg <- flat(c0$IEG_genes)
+pools <- sample_cols
+cond <- setNames(as.character(metadata$condition), sample_cols); ieg <- flat(c0$IEG_genes)
 preview <- file.path(stage2,'07_cluster6_to_Etv1_preview/source_data/preview_cell_mapping.csv.gz')
 stopifnot(file.exists(preview))
 cfg <- c0; cfg$pools <- as.list(pools);cfg$conditions <- as.list(unname(cond))
@@ -28,6 +192,7 @@ cfg$lineage_root <- stage2;cfg$frozen_annotation <- file.path(stage2,'03_annotat
 cfg$accepted_Inh_annotation_resolved <- preview
 cfg$primary_counts <- 'RNA: SoupX-corrected integer UMI counts'
 cfg$secondary_counts <- 'observed: original UMI counts; audit only'
+dir.create(file.path(out,'config'),recursive=TRUE,showWarnings=FALSE)
 write_json(cfg,file.path(out,'config/analysis_config.json'),pretty=TRUE,auto_unbox=TRUE)
 for(d in c('01_inputs','logs','provenance'))dir.create(file.path(out,d),recursive=TRUE,showWarnings=FALSE)
 stamp <- function(...) {cat(format(Sys.time(),tz='UTC',usetz=TRUE),...,'\n');flush.console()}

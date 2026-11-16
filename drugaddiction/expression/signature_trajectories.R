@@ -1,19 +1,221 @@
-#!/usr/bin/env Rscript
-if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
-  cat("Usage: Rscript expression/signature_trajectories.R EXC_PAYLOAD.rds SIX_POOL_EXC_RET_EXT_ALL_GENES.csv OUTPUT_DIR\n")
-  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
-  quit(save = "no", status = 0L)
+# signature trajectories
+
+# 1. Packages
+library(dplyr)
+library(monocle)
+library(igraph)
+library(Matrix)
+library(DESeq2, include.only = character())
+library(DDRTree, include.only = character())
+library(VGAM, include.only = character())
+library(Biobase, include.only = character())
+library(edgeR, include.only = character())
+
+# 2. Paths
+work_dir <- "/path/to/work"
+exc_payload <- file.path(work_dir, "stage3/01_inputs/Excitatory/IEGhigh_payload.rds")
+deg_table <- file.path(work_dir, "deseq2/datasets/Excitatory__RetExt_vs_Ext/tables/ALL_genes.csv")
+result_dir <- file.path(work_dir, "trajectories")
+figure_dir <- file.path(result_dir, "figures")
+
+# 3. Samples and conditions
+sample_cols <- c("WD1", "WD2", "WD3", "Ext1", "Ext2", "Ext3", "Ret-Ext1", "Ret-Ext2", "Ret-Ext3")
+metadata <- data.frame(
+  pool_id = sample_cols,
+  source_sample_id = c("Con1", "Con2", "Con3", "Ext1", "Ext2", "Ext3", "Ret_ext1", "Ret_ext2", "Ret_ext3"),
+  model = rep("Rat IL", 9L),
+  condition = factor(rep(c("WD", "Ext", "Ret-Ext"), each = 3L), levels = c("WD", "Ext", "Ret-Ext")),
+  rats_per_pool = rep(5L, 9L), stringsAsFactors = FALSE)
+
+# 5. Helper functions
+# Input checks and native DESeq2 calculations for the expression workflows.
+require_packages <- function(packages) {
+  absent <- packages[!vapply(packages, requireNamespace, logical(1), quietly = TRUE)]
+  if (length(absent)) stop("Install the required R packages: ", paste(absent, collapse = ", "))
 }
 
-# Nine-pool DESeq2 ranking and the twenty prespecified Monocle 2 signature fits.
-script <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])
-here <- dirname(normalizePath(script, mustWork = TRUE))
-source(file.path(here, "workflow_helpers.R"))
-source(file.path(here, "monocle2_compatibility.R"))
-args <- commandArgs(TRUE)
-if (length(args) != 3L) {
-  stop("Usage: Rscript signature_trajectories.R <excitatory_payload.rds> <six_pool_exc_ret_ext_all_genes.csv> <output_dir>")
+limit_threads <- function() {
+  Sys.setenv(OMP_NUM_THREADS = "1", OPENBLAS_NUM_THREADS = "1",
+             MKL_NUM_THREADS = "1", OMP_THREAD_LIMIT = "1")
+  if (requireNamespace("RhpcBLASctl", quietly = TRUE)) {
+    RhpcBLASctl::blas_set_num_threads(1L)
+  }
 }
+
+new_output_dir <- function(path) {
+  if (dir.exists(path) && length(list.files(path, all.files = TRUE, no.. = TRUE))) {
+    stop("Choose an empty output directory: ", path)
+  }
+  dir.create(path, recursive = TRUE, showWarnings = FALSE)
+  normalizePath(path, mustWork = TRUE)
+}
+
+read_table <- function(path) {
+  read.csv(path, stringsAsFactors = FALSE, check.names = FALSE,
+           fileEncoding = "UTF-8-BOM")
+}
+
+write_table <- function(x, path) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  write.csv(x, path, row.names = FALSE, na = "NA", fileEncoding = "UTF-8")
+}
+
+write_session <- function(out) {
+  writeLines(capture.output(sessionInfo()), file.path(out, "session_info.txt"))
+}
+
+pool_ids <- sample_cols
+pool_conditions <- setNames(as.character(metadata$condition), sample_cols)
+
+read_ieg_payload <- function(path, neuronal_class) {
+  require_packages("Matrix")
+  q <- readRDS(path)
+  stopifnot(all(c("counts", "metadata", "gene_annotation") %in% names(q)))
+  x <- q$counts
+  md <- q$metadata
+  ann <- q$gene_annotation
+  stopifnot(inherits(x, "sparseMatrix"),
+            all(c("Cell", "pool_id", "condition", "IEGhigh") %in% names(md)),
+            all(c("seurat_feature", "gene_id", "original_symbol") %in% names(ann)),
+            identical(colnames(x), as.character(md$Cell)),
+            identical(rownames(x), as.character(ann$seurat_feature)),
+            !anyDuplicated(md$Cell), !anyDuplicated(rownames(x)),
+            all(md$IEGhigh), setequal(md$pool_id, pool_ids),
+            identical(as.character(md$condition), unname(pool_conditions[as.character(md$pool_id)])),
+            all(is.finite(x@x)), all(x@x >= 0), all(x@x == round(x@x)))
+  if ("neuron_type" %in% names(md)) stopifnot(all(md$neuron_type == neuronal_class))
+  q
+}
+
+aggregate_pools <- function(q) {
+  group <- Matrix::sparseMatrix(i = seq_len(ncol(q$counts)),
+                               j = match(q$metadata$pool_id, pool_ids),
+                               x = 1, dims = c(ncol(q$counts), length(pool_ids)))
+  counts <- as.matrix(q$counts %*% group)
+  stopifnot(all(is.finite(counts)), all(counts >= 0), all(counts <= .Machine$integer.max))
+  dimnames(counts) <- list(rownames(q$counts), pool_ids)
+  storage.mode(counts) <- "integer"
+  counts
+}
+
+make_pool_metadata <- function(pools, levels) {
+  data.frame(pool_id = pools, condition = factor(unname(pool_conditions[pools]), levels),
+             row.names = pools)
+}
+
+expression_filter <- function(counts, metadata) {
+  unname(edgeR::filterByExpr(edgeR::DGEList(counts, group = metadata$condition),
+                            design = model.matrix(~ condition, metadata)))
+}
+
+fit_native_deseq <- function(counts, metadata, eligible, numerator, denominator,
+                             allow_convergence_retry = FALSE,
+                             contrast = c("condition", numerator, denominator)) {
+  stopifnot(identical(colnames(counts), rownames(metadata)), any(eligible),
+            length(eligible) == nrow(counts), !anyNA(eligible))
+  dds <- DESeq2::DESeqDataSetFromMatrix(counts[eligible, , drop = FALSE],
+                                       metadata, design = ~ condition)
+  dds <- DESeq2::DESeq(dds, test = "Wald", fitType = "parametric", sfType = "ratio",
+                       betaPrior = FALSE, minReplicatesForReplace = 7L,
+                       quiet = TRUE, parallel = FALSE)
+  initial <- S4Vectors::mcols(dds)$betaConv
+  retried <- any(is.na(initial) | !initial)
+  if (retried && allow_convergence_retry) {
+    dds <- DESeq2::nbinomWaldTest(dds, betaPrior = FALSE, maxit = 1000, quiet = TRUE)
+  }
+  stopifnot(all(S4Vectors::mcols(dds)$betaConv),
+            all(DESeq2::counts(dds) == counts[eligible, , drop = FALSE]),
+            !("replaceCounts" %in% SummarizedExperiment::assayNames(dds)))
+  res <- DESeq2::results(dds, contrast = contrast,
+                         alpha = 0.05, independentFiltering = TRUE,
+                         pAdjustMethod = "BH", parallel = FALSE)
+  threshold <- as.numeric(S4Vectors::metadata(res)$filterThreshold)
+  family <- is.finite(res$pvalue) & res$baseMean >= threshold
+  stopifnot(length(threshold) == 1L, is.finite(threshold),
+            identical(unname(is.finite(res$padj)), unname(family)))
+  if (any(family)) {
+    stopifnot(all(abs(res$padj[family] - p.adjust(res$pvalue[family], "BH")) < 1e-12))
+  }
+  list(model = dds, result = res, filter_threshold = threshold,
+       convergence_retry = retried && allow_convergence_retry)
+}
+
+native_de_table <- function(fit, counts, annotation, eligible, neuronal_class,
+                            numerator, denominator) {
+  r <- as.data.frame(fit$result)
+  idx <- match(rownames(counts), rownames(r))
+  mc <- S4Vectors::mcols(fit$model)
+  cooks <- SummarizedExperiment::assays(fit$model)[["cooks"]]
+  max_cooks <- apply(cooks, 1, function(x) if (any(is.finite(x))) max(x[is.finite(x)]) else NA_real_)
+  z <- data.frame(
+    gene = rownames(counts), gene_id = annotation$gene_id,
+    original_symbol = annotation$original_symbol, eligible = eligible,
+    tested = eligible & is.finite(r$pvalue[idx]),
+    in_BH_family = eligible & is.finite(r$padj[idx]),
+    baseMean = r$baseMean[idx], log2FoldChange = r$log2FoldChange[idx],
+    lfcSE = r$lfcSE[idx], stat = r$stat[idx], pvalue = r$pvalue[idx],
+    padj = r$padj[idx], maxCooks = max_cooks[idx], betaConv = mc$betaConv[idx],
+    neuron_type = neuronal_class, numerator = numerator, denominator = denominator,
+    method = "DESeq2", n_pools = ncol(counts), n_per_condition = 3L,
+    independentFiltering = TRUE, alpha = 0.05, stringsAsFactors = FALSE)
+  z$status <- ifelse(!eligible, "filtered_low_expression_before_fit",
+                     ifelse(!z$tested, "native_P_withheld",
+                            ifelse(!z$in_BH_family, "independent_filter_low_mean", "tested_with_native_BH")))
+  z$BH_significant <- z$in_BH_family & z$padj < 0.05
+  z$display_DEG <- z$BH_significant & abs(z$log2FoldChange) >= log2(1.15)
+  z$DE_direction <- ifelse(z$display_DEG, ifelse(z$log2FoldChange > 0, "Up", "Down"),
+                           ifelse(z$in_BH_family, "Not significant", "Not in BH family"))
+  z
+}
+
+# Compatibility with igraph 2.2.1 and scalar matrix checks in Monocle 2.
+# These replacements are process-local and do not alter installed package files.
+edit_call <- function(x, old, new) {
+  if (is.call(x)) {
+    if (is.symbol(x[[1]]) && identical(as.character(x[[1]]), old)) x[[1]] <- as.name(new)
+    for (i in seq_along(x)) x[i] <- list(edit_call(x[[i]], old, new))
+  }
+  x
+}
+
+edit_argument <- function(x, old, new) {
+  if (is.call(x)) {
+    if (!is.null(names(x))) names(x)[names(x) == old] <- new
+    for (i in seq_along(x)) x[i] <- list(edit_argument(x[[i]], old, new))
+  }
+  x
+}
+
+edit_projection_check <- function(x) {
+  if (is.call(x)) {
+    if (identical(x, quote(class(projection) != "matrix"))) return(quote(!is.matrix(projection)))
+    for (i in seq_along(x)) x[i] <- list(edit_projection_check(x[[i]]))
+  }
+  x
+}
+
+apply_monocle2_compatibility <- function() {
+  toy <- quote({ projection <- NULL; zz <- a[, 1]; z <- nei("a"); dfs(g, neimode = "all")
+                 if (class(projection) != "matrix") projection <- as.matrix(projection) })
+  expected <- quote({ projection <- NULL; zz <- a[, 1]; z <- .nei("a"); dfs(g, mode = "all")
+                      if (!is.matrix(projection)) projection <- as.matrix(projection) })
+  stopifnot(identical(edit_projection_check(edit_call(edit_argument(toy, "neimode", "mode"),
+                                                       "nei", ".nei")), expected))
+  ns <- asNamespace("monocle")
+  update <- function(name, edit) {
+    fn <- get(name, envir = ns, inherits = FALSE)
+    body(fn) <- edit(body(fn))
+    locked <- bindingIsLocked(name, ns)
+    if (locked) unlockBinding(name, ns)
+    on.exit(if (locked) lockBinding(name, ns), add = TRUE)
+    assign(name, fn, envir = ns)
+  }
+  update("extract_ddrtree_ordering", function(x) edit_argument(x, "neimode", "mode"))
+  update("project2MST", function(x) edit_projection_check(edit_call(x, "nei", ".nei")))
+}
+
+# 6. Analysis and output
+# Nine-pool DESeq2 ranking and the twenty prespecified Monocle 2 signature fits.
 limit_threads()
 invisible(Sys.setlocale("LC_COLLATE", "C"))
 require_packages(c("DESeq2", "Matrix", "monocle", "DDRTree", "igraph", "VGAM", "Biobase", "dplyr"))
@@ -30,10 +232,10 @@ if (!identical(versions, observed)) {
   stop("Use the recorded package versions for trajectory reproduction: ",
        paste(names(versions), versions, sep = "=", collapse = ", "))
 }
-out <- new_output_dir(args[3])
-q <- read_ieg_payload(args[1], "Excitatory")
+out <- new_output_dir(result_dir)
+q <- read_ieg_payload(exc_payload, "Excitatory")
 pb <- aggregate_pools(q)
-baseline <- read_table(args[2])
+baseline <- read_table(deg_table)
 stopifnot(identical(baseline$gene, rownames(pb)), all(baseline$neuron_type == "Excitatory"),
           all(baseline$n_pools == 6L), all(baseline$numerator == "Ret-Ext"),
           all(baseline$denominator == "Ext"), all(baseline$independentFiltering),

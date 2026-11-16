@@ -1,20 +1,298 @@
-#!/usr/bin/env Rscript
-if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
-  cat("Usage: Rscript upstream/stage1/03_plot_global_review.R --root STAGE1_DIR [--config JSON]\n")
-  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
-  quit(save = "no", status = 0L)
-}
-.upstream_entry <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1L])
-source(file.path(dirname(dirname(normalizePath(.upstream_entry, mustWork = TRUE))), "script_io.R"))
+# 03 plot global review
 
+# 1. Packages
+library(jsonlite, include.only = character())
+library(ggplot2, include.only = character())
+library(patchwork, include.only = character())
+library(ggrepel, include.only = character())
+library(Matrix, include.only = character())
+library(ragg, include.only = character())
+
+# 2. Paths
+input_dir <- "/path/to/matrices"
+work_dir <- "/path/to/work"
+result_dir <- file.path(work_dir, "stage1")
+figure_dir <- result_dir
+fontconfig_file <- NULL
+script_path <- "/path/to/03_plot_global_review.R"
+
+# 3. Samples and conditions
+sample_cols <- c("WD1", "WD2", "WD3", "Ext1", "Ext2", "Ext3", "Ret-Ext1", "Ret-Ext2", "Ret-Ext3")
+metadata <- data.frame(
+  pool_id = sample_cols,
+  source_sample_id = c("Con1", "Con2", "Con3", "Ext1", "Ext2", "Ext3", "Ret_ext1", "Ret_ext2", "Ret_ext3"),
+  model = rep("Rat IL", 9L),
+  condition = factor(rep(c("WD", "Ext", "Ret-Ext"), each = 3L), levels = c("WD", "Ext", "Ret-Ext")),
+  rats_per_pool = rep(5L, 9L), stringsAsFactors = FALSE)
+
+# 4. Parameters and marker definitions
+processing_settings <- list(
+  `schema_version` = "1.0",
+  `run_id` = "20261101_Manuscript_matched_stage1_01",
+  `stage_gate` = "global_celltype_review",
+  `analysis_seed` = 42L,
+  `threads` = 4L,
+  `samples` = list(
+    list(
+      `sample_id` = "Con1",
+      `condition_label` = "WD"
+    ),
+    list(
+      `sample_id` = "Con2",
+      `condition_label` = "WD"
+    ),
+    list(
+      `sample_id` = "Con3",
+      `condition_label` = "WD"
+    ),
+    list(
+      `sample_id` = "Ext1",
+      `condition_label` = "Ext"
+    ),
+    list(
+      `sample_id` = "Ext2",
+      `condition_label` = "Ext"
+    ),
+    list(
+      `sample_id` = "Ext3",
+      `condition_label` = "Ext"
+    ),
+    list(
+      `sample_id` = "Ret_ext1",
+      `condition_label` = "Ret-Ext"
+    ),
+    list(
+      `sample_id` = "Ret_ext2",
+      `condition_label` = "Ret-Ext"
+    ),
+    list(
+      `sample_id` = "Ret_ext3",
+      `condition_label` = "Ret-Ext"
+    )
+  ),
+  `runtime` = list(
+    `threads` = 4L,
+    `blas_threads` = 1L,
+    `r_libraries` = list(),
+    `fontconfig_file` = NULL,
+    `font_family` = "Arial"
+  ),
+  `initial_eligibility` = list(
+    `method` = "native Seurat CreateSeuratObject on original called counts",
+    `min_cells_per_gene` = 3L,
+    `min_features_per_cell` = 300L,
+    `preserve_all_called_barcode_audit` = TRUE
+  ),
+  `qc` = list(
+    `metric_assay` = "observed original UMI counts",
+    `metric_gene_scope` = "genes retained by native initial min.cells=3/min.features=300 qualification",
+    `nFeature_lower_exclusive` = 700L,
+    `nFeature_upper_exclusive` = 5000L,
+    `nCount_lower_exclusive` = 500L,
+    `nCount_upper_exclusive` = 30000L,
+    `percent_mt_upper_exclusive` = 5L,
+    `log10GenesPerUMI_lower_exclusive` = 0.75,
+    `complexity_formula` = "log10(nFeature) / log10(nCount)",
+    `nonfinite_metrics_fail` = TRUE,
+    `MAD_filters` = FALSE,
+    `mitochondrial_gene_ids` = list(
+      "ENSRNOG00000030644",
+      "ENSRNOG00000031033",
+      "ENSRNOG00000034234",
+      "ENSRNOG00000030371",
+      "ENSRNOG00000033299",
+      "ENSRNOG00000031979",
+      "ENSRNOG00000030700",
+      "ENSRNOG00000033615",
+      "ENSRNOG00000031053",
+      "ENSRNOG00000029707",
+      "ENSRNOG00000029971",
+      "ENSRNOG00000029042",
+      "ENSRNOG00000031766"
+    ),
+    `mitochondrial_symbols` = list(
+      "ND1",
+      "ND2",
+      "COX1",
+      "COX2",
+      "ATP8",
+      "ATP6",
+      "COX3",
+      "ND3",
+      "ND4L",
+      "ND4",
+      "ND5",
+      "ND6",
+      "CYTB"
+    ),
+    `ribo_symbol_pattern` = "^(Rpl|Rps)",
+    `ribo_filter` = FALSE,
+    `corrected_metrics_role` = "audit only; cannot rescue observed-QC failures",
+    `full_GEX_metrics_role` = "diagnostic only; not used for the manuscript thresholds"
+  ),
+  `ambient` = list(
+    `method` = "SoupX",
+    `input` = "fresh original raw/filtered H5, all called barcodes and input genes",
+    `precluster_genes_min` = 200L,
+    `precluster_umi_min` = 300L,
+    `precluster_n_hvg` = 2000L,
+    `precluster_n_pcs` = 30L,
+    `precluster_neighbor_dims` = 20L,
+    `precluster_resolution` = 0.6,
+    `round_to_integer` = TRUE,
+    `rho_review_max` = 0.3,
+    `force_accept` = FALSE,
+    `reuse_previous_analysis_counts` = FALSE
+  ),
+  `doublet` = list(
+    `method` = "scDblFinder",
+    `per_capture` = TRUE,
+    `input` = "corrected counts of initial-qualified genes and observed-QC-passing nuclei",
+    `clusters` = FALSE,
+    `dbr_per_1000` = 0.004,
+    `dbr_denominator` = "original Cell Ranger-called barcode count per capture before initial eligibility and QC",
+    `dbr_sd` = "package default",
+    `xgb_nthreads` = 4L,
+    `BPPARAM` = "SerialParam",
+    `chemistry` = "Chromium GEM-X Single Cell 3 prime v4",
+    `vendor_doublet_calls_role` = "not combined with exclusions"
+  ),
+  `global` = list(
+    `n_hvg` = 2000L,
+    `n_pcs` = 50L,
+    `pc_max` = 30L,
+    `regress_vars` = list(
+      "nCount_RNA",
+      "percent.mt"
+    ),
+    `harmony_group_by` = "sample_id",
+    `regress_condition` = FALSE,
+    `neighbors_k` = 20L,
+    `resolutions` = list(
+      0.1,
+      0.2,
+      0.3,
+      0.4,
+      0.5,
+      0.6,
+      0.7,
+      0.8,
+      0.9,
+      1.0
+    ),
+    `primary_resolution` = 1.0,
+    `umap_n_neighbors` = 30L,
+    `umap_min_dist` = 0.3,
+    `umap_metric` = "cosine",
+    `seed` = 42L,
+    `threads` = 4L,
+    `percent_mt_metadata_source` = "percent_mt_observed in initial-qualified gene set",
+    `annotation_policy` = "fresh clusters; major-cell-type marker review before any lineage subclustering"
+  ),
+  `output_interface` = list(
+    `sample_directory` = "02_qc_doublet/<sample_id>",
+    `singlet_object` = "02_qc_doublet/<sample_id>/singlet_clean.rds",
+    `all_called_QC` = "02_qc_doublet/<sample_id>/all_called_barcodes_QC.csv.gz",
+    `aggregate_summary` = "02_qc_doublet/attrition_summary.csv",
+    `primary_assay` = "RNA: SoupX-corrected integer UMI counts",
+    `audit_assay` = "observed: matching original UMI counts",
+    `metadata_join_key` = "sample_id__10x-barcode",
+    `no_old_embeddings_or_labels` = TRUE
+  ),
+  `input_root` = NULL
+)
+processing_settings$input_root <- input_dir
+processing_settings$runtime["fontconfig_file"] <- list(fontconfig_file)
+processing_settings$samples <- lapply(seq_len(nrow(metadata)), function(i) list(
+  sample_id = metadata$source_sample_id[i], condition_label = as.character(metadata$condition[i])))
+sample_naming <- list(
+  `schema_version` = "1.0",
+  `requested_on` = "2026-11-01",
+  `source_files_read_only` = TRUE,
+  `naming_only_no_count_changes` = TRUE,
+  `cell_id_format` = "<sample_id>__<original_10x_barcode>",
+  `canonical_conditions` = list(
+    "WD",
+    "Ext",
+    "Ret-Ext"
+  ),
+  `sample_map` = list(
+    list(
+      `source_sample_id` = "Con1",
+      `sample_id` = "WD1",
+      `condition_label` = "WD"
+    ),
+    list(
+      `source_sample_id` = "Con2",
+      `sample_id` = "WD2",
+      `condition_label` = "WD"
+    ),
+    list(
+      `source_sample_id` = "Con3",
+      `sample_id` = "WD3",
+      `condition_label` = "WD"
+    ),
+    list(
+      `source_sample_id` = "Ext1",
+      `sample_id` = "Ext1",
+      `condition_label` = "Ext"
+    ),
+    list(
+      `source_sample_id` = "Ext2",
+      `sample_id` = "Ext2",
+      `condition_label` = "Ext"
+    ),
+    list(
+      `source_sample_id` = "Ext3",
+      `sample_id` = "Ext3",
+      `condition_label` = "Ext"
+    ),
+    list(
+      `source_sample_id` = "Ret_ext1",
+      `sample_id` = "Ret-Ext1",
+      `condition_label` = "Ret-Ext"
+    ),
+    list(
+      `source_sample_id` = "Ret_ext2",
+      `sample_id` = "Ret-Ext2",
+      `condition_label` = "Ret-Ext"
+    ),
+    list(
+      `source_sample_id` = "Ret_ext3",
+      `sample_id` = "Ret-Ext3",
+      `condition_label` = "Ret-Ext"
+    )
+  )
+)
+sample_naming$sample_map <- lapply(seq_len(nrow(metadata)), function(i) list(
+  source_sample_id = metadata$source_sample_id[i], sample_id = metadata$pool_id[i],
+  condition_label = as.character(metadata$condition[i])))
+
+# 5. Helper functions
+save_settings <- function(value, filename) {
+  path <- file.path(result_dir, "provenance", filename)
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  if (file.exists(path)) {
+    previous <- jsonlite::read_json(path, simplifyVector = FALSE)
+    if (!isTRUE(all.equal(previous, value, tolerance = 0))) stop("Existing settings differ: ", path)
+  } else {
+    jsonlite::write_json(value, path, pretty = TRUE, auto_unbox = TRUE, null = "null", digits = 17)
+  }
+  path
+}
+
+# 6. Analysis and output
+dir.create(result_dir, recursive = TRUE, showWarnings = FALSE)
+config_snapshot <- save_settings(processing_settings, "processing_settings.json")
+naming_snapshot <- save_settings(sample_naming, "sample_naming.json")
 # Stage 1 marker review only; this renderer does not alter analysis or labels.
 
 stage1_plot_main <- function(root, config = file.path(root, "config", "processing_config.json")) {
   root <- normalizePath(root, mustWork = TRUE)
-  cfg <- jsonlite::read_json(config, simplifyVector = FALSE)
-  naming_path <- file.path(root, "config", "sample_naming.json")
+  cfg <- processing_settings
+  naming_path <- naming_snapshot
   if (!file.exists(naming_path)) stop("Canonical sample-naming manifest is required.")
-  naming <- jsonlite::read_json(naming_path, simplifyVector = FALSE)
+  naming <- sample_naming
   if (!is.null(cfg$stage_gate) && cfg$stage_gate != "global_celltype_review")
     stop("This renderer is restricted to the first user-review gate.")
   libs <- unlist(cfg$runtime$r_libraries, use.names = FALSE)
@@ -163,7 +441,188 @@ stage1_plot_main <- function(root, config = file.path(root, "config", "processin
   pC <- dotplot(cluster_stats, genes, cluster_levels, "Canonical markers across new clusters")
   save_plot(pC, "02_DotPlot/C_canonical_markers_by_cluster", 183, max(100, 35 + length(cluster_ids) * 3.6))
   # Recompute gene-wise color scaling within this displayed grouping, as in Seurat DotPlot.
-  source(upstream_script("stage1", "02_global_celltype.R"), local = TRUE)
+  stage1_now <- function() format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z")
+stage1_log <- function(...) { cat(stage1_now(), ..., "\n"); flush.console() }
+
+stage1_log <- function(...) { cat(stage1_now(), ..., "\n"); flush.console() }
+
+stage1_write_json <- function(x, path) jsonlite::write_json(x, path, pretty = TRUE,
+  auto_unbox = TRUE, null = "null", na = "null", dataframe = "rows", digits = 16)
+stage1_atomic_rds <- function(x, path) {
+  if (file.exists(path)) stop("Refusing to overwrite completed object: ", path)
+  tmp <- tempfile(".incomplete-", tmpdir = dirname(path))
+  saveRDS(x, tmp, compress = FALSE)
+  if (!file.rename(tmp, path)) stop("Atomic rename failed; temporary object retained: ", tmp)
+}
+
+stage1_atomic_rds <- function(x, path) {
+  if (file.exists(path)) stop("Refusing to overwrite completed object: ", path)
+  tmp <- tempfile(".incomplete-", tmpdir = dirname(path))
+  saveRDS(x, tmp, compress = FALSE)
+  if (!file.rename(tmp, path)) stop("Atomic rename failed; temporary object retained: ", tmp)
+}
+
+stage1_levels <- function(x) {
+  v <- unique(as.character(x)); n <- suppressWarnings(as.numeric(v))
+  v[order(is.na(n), n, v)]
+}
+
+stage1_panel <- function() list(
+  Excitatory = c("Slc17a7", "Satb2", "Slc30a3"),
+  Inhibitory = c("Gad1", "Gad2", "Dlx1"),
+  Oligodendrocytes = c("Mog", "Mbp", "St18"),
+  OPC = c("Cacng4", "Pdgfra", "Vcan"),
+  Astrocytes = c("Slco1c1", "Gfap", "Aqp4"),
+  Microglia = c("P2ry12", "Tmem119", "Cx3cr1"))
+stage1_review_genes <- function() c("Snap25", "Rbfox3", "Plp1", "Sox10", "Cnp", "Mag",
+  "Aldh1l1", "Cldn5", "Pecam1", "Kdr", "Flt1", "Cdh5", "Rgs5", "Pdgfrb",
+  "Kcnj8", "Abcc9", "Acta2", "Col1a1", "Col1a2", "Dcn", "Lum", "Ptprc",
+  "Csf1r", "Mrc1", "Cd163", "Lyz2")
+
+stage1_get_counts <- function(obj, assay) {
+  a <- obj[[assay]]
+  if (is.null(a)) stop("Missing assay: ", assay)
+  if (inherits(a, "Assay5")) {
+    layers <- SeuratObject::Layers(a, search = NA)
+    cc <- grep("^counts($|\\.)", layers, value = TRUE)
+    if (length(cc) != 1L) stop("Each input must have one counts layer: ", assay)
+    x <- SeuratObject::LayerData(a, layer = cc[[1L]])
+  } else x <- SeuratObject::GetAssayData(a, slot = "counts")
+  if (!inherits(x, "sparseMatrix") || any(!is.finite(x@x)) || any(x@x < 0) ||
+      any(x@x != round(x@x))) stop("Invalid sparse integer counts in ", assay)
+  x
+}
+
+stage1_review_genes <- function() c("Snap25", "Rbfox3", "Plp1", "Sox10", "Cnp", "Mag",
+  "Aldh1l1", "Cldn5", "Pecam1", "Kdr", "Flt1", "Cdh5", "Rgs5", "Pdgfrb",
+  "Kcnj8", "Abcc9", "Acta2", "Col1a1", "Col1a2", "Dcn", "Lum", "Ptprc",
+  "Csf1r", "Mrc1", "Cd163", "Lyz2")
+
+stage1_get_counts <- function(obj, assay) {
+  a <- obj[[assay]]
+  if (is.null(a)) stop("Missing assay: ", assay)
+  if (inherits(a, "Assay5")) {
+    layers <- SeuratObject::Layers(a, search = NA)
+    cc <- grep("^counts($|\\.)", layers, value = TRUE)
+    if (length(cc) != 1L) stop("Each input must have one counts layer: ", assay)
+    x <- SeuratObject::LayerData(a, layer = cc[[1L]])
+  } else x <- SeuratObject::GetAssayData(a, slot = "counts")
+  if (!inherits(x, "sparseMatrix") || any(!is.finite(x@x)) || any(x@x < 0) ||
+      any(x@x != round(x@x))) stop("Invalid sparse integer counts in ", assay)
+  x
+}
+
+stage1_get_counts <- function(obj, assay) {
+  a <- obj[[assay]]
+  if (is.null(a)) stop("Missing assay: ", assay)
+  if (inherits(a, "Assay5")) {
+    layers <- SeuratObject::Layers(a, search = NA)
+    cc <- grep("^counts($|\\.)", layers, value = TRUE)
+    if (length(cc) != 1L) stop("Each input must have one counts layer: ", assay)
+    x <- SeuratObject::LayerData(a, layer = cc[[1L]])
+  } else x <- SeuratObject::GetAssayData(a, slot = "counts")
+  if (!inherits(x, "sparseMatrix") || any(!is.finite(x@x)) || any(x@x < 0) ||
+      any(x@x != round(x@x))) stop("Invalid sparse integer counts in ", assay)
+  x
+}
+
+stage1_gene_stats <- function(value, gene, group, levels) {
+  if (length(value) != length(group) || any(!is.finite(value)) || any(value < 0))
+    stop("Invalid normalized marker values: ", gene)
+  n <- as.integer(table(factor(group, levels = levels)))
+  ss <- rowsum(cbind(detected = as.numeric(value > 0), log_value = value,
+                    linear_value = expm1(value)), group, reorder = FALSE)
+  ss <- ss[match(levels, rownames(ss)), , drop = FALSE]
+  av <- ss[, "linear_value"] / n
+  lv <- log1p(av); s <- stats::sd(lv)
+  z <- if (is.finite(s) && s > 0) (lv - mean(lv)) / s else rep(0, length(lv))
+  data.frame(gene = gene, cluster = levels, n_cells = n,
+    n_cells_expressed = ss[, "detected"], pct_expressed = 100 * ss[, "detected"] / n,
+    avg_normalized_data = ss[, "log_value"] / n, avg_linear_normalized = av,
+    log1p_avg_linear_normalized = lv, gene_z_unclipped = z,
+    avg_expression_scaled = pmax(-2.5, pmin(2.5, z)), row.names = NULL)
+}
+
+stage1_annotation <- function(stats, clusters) {
+  panels <- stage1_panel()
+  get <- function(cluster, gene, column) {
+    i <- stats$cluster == cluster & stats$gene == gene
+    if (sum(i) != 1L) return(NA_real_)
+    stats[[column]][i]
+  }
+  decisions <- evidence <- vector("list", length(clusters))
+  for (i in seq_along(clusters)) {
+    cl <- clusters[[i]]
+    pp <- vapply(names(panels), function(label) {
+      mean(vapply(panels[[label]], function(g) get(cl, g, "gene_z_unclipped"), numeric(1)), na.rm = TRUE)
+    }, numeric(1))
+    detected <- function(g) vapply(g, function(z) get(cl, z, "pct_expressed"), numeric(1))
+    enough <- function(g, cutoff, n = 2L) sum(detected(g) >= cutoff, na.rm = TRUE) >= n
+    pass <- c(
+      Excitatory = isTRUE(detected("Slc17a7") >= 10) &&
+        enough(c("Satb2", "Slc30a3"), 5, 1L),
+      Inhibitory = enough(c("Gad1", "Gad2"), 10),
+      Oligodendrocytes = isTRUE(detected("Mbp") >= 10) &&
+        enough(c("Mog", "St18"), 5, 1L),
+      OPC = isTRUE(detected("Pdgfra") >= 5) &&
+        enough(c("Cacng4", "Vcan"), 10, 1L),
+      Astrocytes = enough(c("Slco1c1", "Gfap", "Aqp4"), 5),
+      Microglia = enough(c("P2ry12", "Tmem119", "Cx3cr1"), 2))
+    available <- vapply(panels, function(g) sum(g %in% stats$gene), integer(1))
+    pass <- pass & available >= 2L & is.finite(pp) & pp > 0
+    candidates <- names(pass)[pass]
+    candidates <- candidates[order(pp[candidates], decreasing = TRUE)]
+    dominant <- if (length(candidates)) candidates[[1L]] else "Unresolved"
+    margin <- if (length(candidates) >= 2L) pp[candidates[1L]] - pp[candidates[2L]] else NA_real_
+    mixed <- length(candidates) >= 2L && is.finite(margin) && margin <= 0.25
+    endothelial <- enough(c("Cldn5", "Pecam1", "Kdr", "Flt1", "Cdh5"), 15)
+    mural <- enough(c("Rgs5", "Pdgfrb", "Kcnj8", "Abcc9", "Acta2"), 15)
+    fibroblast <- enough(c("Col1a1", "Col1a2", "Dcn", "Lum"), 15)
+    vascular_flag <- endothelial || mural || fibroblast
+    myeloid_flag <- isTRUE(detected("Ptprc") >= 20) &&
+      enough(c("Csf1r", "Mrc1", "Cd163", "Lyz2"), 10) && !isTRUE(pass["Microglia"])
+    proposed <- if (mixed) "Mixed" else dominant
+    if (vascular_flag || myeloid_flag) proposed <- "Unresolved"
+    cross_neuronal <- enough(c("Gad1", "Gad2"), 10) &&
+      isTRUE(detected("Slc17a7") >= 10)
+    if (cross_neuronal) proposed <- "Mixed"
+    review <- c(if (mixed) "Competing canonical panels",
+      if (vascular_flag) "Vascular-associated marker evidence; not forced into six classes",
+      if (myeloid_flag) "Other myeloid marker evidence; not forced into Microglia",
+      if (cross_neuronal) "Excitatory and inhibitory marker cross-signal",
+      if (dominant == "Unresolved") "Insufficient canonical marker evidence")
+    evidence[[i]] <- data.frame(cluster = cl, panel = names(panels),
+      n_markers_available = available, marker_genes = vapply(panels, paste, "", collapse = ";"),
+      mean_gene_z = pp, detection_gate_passed = pass, row.names = NULL)
+    decisions[[i]] <- data.frame(cluster = cl,
+      n_cells = stats$n_cells[match(cl, stats$cluster)],
+      proposed_major_class = proposed, dominant_canonical_candidate = dominant,
+      qualifying_canonical_panels = paste(candidates, collapse = ";"),
+      top_panel_score = if (dominant == "Unresolved") NA_real_ else unname(pp[dominant]),
+      top_two_score_margin = unname(margin), cross_neuronal_markers = cross_neuronal,
+      vascular_review_flag = vascular_flag, other_myeloid_review_flag = myeloid_flag,
+      annotation_status = "pending_user_marker_review", annotation_is_probability = FALSE,
+      review_notes = paste(review, collapse = "; "), row.names = NULL)
+  }
+  list(decisions = do.call(rbind, decisions), evidence = do.call(rbind, evidence))
+}
+
+stage1_select_pcs <- function(sd, cap = 30L) {
+  variance <- sd^2
+  pct <- 100 * variance / sum(variance)
+  cum <- cumsum(pct)
+  eligible <- which(cum > 90 & pct < 5)
+  drops <- which(head(pct, -1L) - tail(pct, -1L) > 0.1)
+  co1 <- if (length(eligible)) eligible[[1L]] else Inf
+  co2 <- if (length(drops)) max(drops) + 1L else Inf
+  k <- as.integer(min(co1, co2, cap, length(sd)))
+  if (!is.finite(k) || k < 2L) stop("Variance-profile PC rule returned too few dimensions.")
+  list(npcs = k, criterion_cumulative90_pct5 = co1, criterion_last_drop_over_point1 = co2,
+    cap = cap, definition = "100 * stdev^2 / sum(stdev^2) across the 50 computed PCs; min(first cumulative>90% and PC<5%, last adjacent percent drop>0.1 plus one, 30)",
+    table = data.frame(PC = seq_along(sd), stdev = sd, variance = variance,
+      percent_of_computed_PCs = pct, cumulative_percent = cum, used = seq_along(sd) <= k))
+}
+
   group_levels <- names(used_palette)
   group_stats <- do.call(rbind, lapply(rownames(x), function(g) stage1_gene_stats(
     as.numeric(x[g, ]), g, as.character(d$proposed_major_class), group_levels)))
@@ -234,10 +693,4 @@ stage1_plot_main <- function(root, config = file.path(root, "config", "processin
   cat("Global celltype review ready. STOP: await user marker confirmation.\n")
 }
 
-if (sys.nframe() == 0L && Sys.getenv("STAGE1_SOURCE_ONLY") != "1") {
-  a <- commandArgs(trailingOnly = TRUE)
-  if (length(a) < 2L || a[[1L]] != "--root") stop("Usage: Rscript 03_plot_global_review.R --root NEW_ROOT [--config CONFIG]")
-  if (!requireNamespace("jsonlite", quietly = TRUE)) stop("jsonlite is required to read configuration.")
-  cp <- upstream_processing_configuration(upstream_work_directory(a[[2L]]), upstream_option("--config"))
-  stage1_plot_main(a[[2L]], cp)
-}
+stage1_plot_main(result_dir, config_snapshot)

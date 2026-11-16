@@ -1,27 +1,202 @@
-#!/usr/bin/env Rscript
-if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
-  cat("Usage: Rscript expression/plot_gene_category_network.R NETWORK_DIR OUTPUT_DIR [DOWN_LAYOUT.csv UP_LAYOUT.csv]\n")
-  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
-  quit(save = "no", status = 0L)
+# plot gene category network
+
+# 1. Packages
+library(grid)
+library(igraph)
+library(ragg, include.only = character())
+library(svglite, include.only = character())
+library(systemfonts, include.only = character())
+
+# 2. Paths
+work_dir <- "/path/to/work"
+input_dir <- file.path(work_dir, "gene_category_network")
+figure_dir <- file.path(work_dir, "network_figures")
+result_dir <- figure_dir
+down_layout <- NULL
+up_layout <- NULL
+
+# 3. Samples and conditions
+sample_cols <- c("WD1", "WD2", "WD3", "Ext1", "Ext2", "Ext3", "Ret-Ext1", "Ret-Ext2", "Ret-Ext3")
+metadata <- data.frame(
+  pool_id = sample_cols,
+  source_sample_id = c("Con1", "Con2", "Con3", "Ext1", "Ext2", "Ext3", "Ret_ext1", "Ret_ext2", "Ret_ext3"),
+  model = rep("Rat IL", 9L),
+  condition = factor(rep(c("WD", "Ext", "Ret-Ext"), each = 3L), levels = c("WD", "Ext", "Ret-Ext")),
+  rats_per_pool = rep(5L, 9L), stringsAsFactors = FALSE)
+
+# 5. Helper functions
+# Input checks and native DESeq2 calculations for the expression workflows.
+require_packages <- function(packages) {
+  absent <- packages[!vapply(packages, requireNamespace, logical(1), quietly = TRUE)]
+  if (length(absent)) stop("Install the required R packages: ", paste(absent, collapse = ", "))
 }
 
-# Draw the down/up gene-category network without panel tags or label backgrounds.
-script <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])
-here <- dirname(normalizePath(script, mustWork = TRUE))
-source(file.path(here, "workflow_helpers.R"))
-source(file.path(here, "figure_helpers.R"))
-args <- commandArgs(TRUE)
-if (!length(args) %in% c(2L, 4L)) {
-  stop(paste("Usage: Rscript plot_gene_category_network.R <network_output_dir> <output_dir>",
-             "[<approved_down_layout.csv> <approved_up_layout.csv>]"))
+limit_threads <- function() {
+  Sys.setenv(OMP_NUM_THREADS = "1", OPENBLAS_NUM_THREADS = "1",
+             MKL_NUM_THREADS = "1", OMP_THREAD_LIMIT = "1")
+  if (requireNamespace("RhpcBLASctl", quietly = TRUE)) {
+    RhpcBLASctl::blas_set_num_threads(1L)
+  }
 }
-load_figure_packages(if (length(args) == 2L) "igraph" else character())
+
+new_output_dir <- function(path) {
+  if (dir.exists(path) && length(list.files(path, all.files = TRUE, no.. = TRUE))) {
+    stop("Choose an empty output directory: ", path)
+  }
+  dir.create(path, recursive = TRUE, showWarnings = FALSE)
+  normalizePath(path, mustWork = TRUE)
+}
+
+read_table <- function(path) {
+  read.csv(path, stringsAsFactors = FALSE, check.names = FALSE,
+           fileEncoding = "UTF-8-BOM")
+}
+
+write_table <- function(x, path) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  write.csv(x, path, row.names = FALSE, na = "NA", fileEncoding = "UTF-8")
+}
+
+write_session <- function(out) {
+  writeLines(capture.output(sessionInfo()), file.path(out, "session_info.txt"))
+}
+
+pool_ids <- sample_cols
+pool_conditions <- setNames(as.character(metadata$condition), sample_cols)
+
+read_ieg_payload <- function(path, neuronal_class) {
+  require_packages("Matrix")
+  q <- readRDS(path)
+  stopifnot(all(c("counts", "metadata", "gene_annotation") %in% names(q)))
+  x <- q$counts
+  md <- q$metadata
+  ann <- q$gene_annotation
+  stopifnot(inherits(x, "sparseMatrix"),
+            all(c("Cell", "pool_id", "condition", "IEGhigh") %in% names(md)),
+            all(c("seurat_feature", "gene_id", "original_symbol") %in% names(ann)),
+            identical(colnames(x), as.character(md$Cell)),
+            identical(rownames(x), as.character(ann$seurat_feature)),
+            !anyDuplicated(md$Cell), !anyDuplicated(rownames(x)),
+            all(md$IEGhigh), setequal(md$pool_id, pool_ids),
+            identical(as.character(md$condition), unname(pool_conditions[as.character(md$pool_id)])),
+            all(is.finite(x@x)), all(x@x >= 0), all(x@x == round(x@x)))
+  if ("neuron_type" %in% names(md)) stopifnot(all(md$neuron_type == neuronal_class))
+  q
+}
+
+aggregate_pools <- function(q) {
+  group <- Matrix::sparseMatrix(i = seq_len(ncol(q$counts)),
+                               j = match(q$metadata$pool_id, pool_ids),
+                               x = 1, dims = c(ncol(q$counts), length(pool_ids)))
+  counts <- as.matrix(q$counts %*% group)
+  stopifnot(all(is.finite(counts)), all(counts >= 0), all(counts <= .Machine$integer.max))
+  dimnames(counts) <- list(rownames(q$counts), pool_ids)
+  storage.mode(counts) <- "integer"
+  counts
+}
+
+make_pool_metadata <- function(pools, levels) {
+  data.frame(pool_id = pools, condition = factor(unname(pool_conditions[pools]), levels),
+             row.names = pools)
+}
+
+expression_filter <- function(counts, metadata) {
+  unname(edgeR::filterByExpr(edgeR::DGEList(counts, group = metadata$condition),
+                            design = model.matrix(~ condition, metadata)))
+}
+
+fit_native_deseq <- function(counts, metadata, eligible, numerator, denominator,
+                             allow_convergence_retry = FALSE,
+                             contrast = c("condition", numerator, denominator)) {
+  stopifnot(identical(colnames(counts), rownames(metadata)), any(eligible),
+            length(eligible) == nrow(counts), !anyNA(eligible))
+  dds <- DESeq2::DESeqDataSetFromMatrix(counts[eligible, , drop = FALSE],
+                                       metadata, design = ~ condition)
+  dds <- DESeq2::DESeq(dds, test = "Wald", fitType = "parametric", sfType = "ratio",
+                       betaPrior = FALSE, minReplicatesForReplace = 7L,
+                       quiet = TRUE, parallel = FALSE)
+  initial <- S4Vectors::mcols(dds)$betaConv
+  retried <- any(is.na(initial) | !initial)
+  if (retried && allow_convergence_retry) {
+    dds <- DESeq2::nbinomWaldTest(dds, betaPrior = FALSE, maxit = 1000, quiet = TRUE)
+  }
+  stopifnot(all(S4Vectors::mcols(dds)$betaConv),
+            all(DESeq2::counts(dds) == counts[eligible, , drop = FALSE]),
+            !("replaceCounts" %in% SummarizedExperiment::assayNames(dds)))
+  res <- DESeq2::results(dds, contrast = contrast,
+                         alpha = 0.05, independentFiltering = TRUE,
+                         pAdjustMethod = "BH", parallel = FALSE)
+  threshold <- as.numeric(S4Vectors::metadata(res)$filterThreshold)
+  family <- is.finite(res$pvalue) & res$baseMean >= threshold
+  stopifnot(length(threshold) == 1L, is.finite(threshold),
+            identical(unname(is.finite(res$padj)), unname(family)))
+  if (any(family)) {
+    stopifnot(all(abs(res$padj[family] - p.adjust(res$pvalue[family], "BH")) < 1e-12))
+  }
+  list(model = dds, result = res, filter_threshold = threshold,
+       convergence_retry = retried && allow_convergence_retry)
+}
+
+native_de_table <- function(fit, counts, annotation, eligible, neuronal_class,
+                            numerator, denominator) {
+  r <- as.data.frame(fit$result)
+  idx <- match(rownames(counts), rownames(r))
+  mc <- S4Vectors::mcols(fit$model)
+  cooks <- SummarizedExperiment::assays(fit$model)[["cooks"]]
+  max_cooks <- apply(cooks, 1, function(x) if (any(is.finite(x))) max(x[is.finite(x)]) else NA_real_)
+  z <- data.frame(
+    gene = rownames(counts), gene_id = annotation$gene_id,
+    original_symbol = annotation$original_symbol, eligible = eligible,
+    tested = eligible & is.finite(r$pvalue[idx]),
+    in_BH_family = eligible & is.finite(r$padj[idx]),
+    baseMean = r$baseMean[idx], log2FoldChange = r$log2FoldChange[idx],
+    lfcSE = r$lfcSE[idx], stat = r$stat[idx], pvalue = r$pvalue[idx],
+    padj = r$padj[idx], maxCooks = max_cooks[idx], betaConv = mc$betaConv[idx],
+    neuron_type = neuronal_class, numerator = numerator, denominator = denominator,
+    method = "DESeq2", n_pools = ncol(counts), n_per_condition = 3L,
+    independentFiltering = TRUE, alpha = 0.05, stringsAsFactors = FALSE)
+  z$status <- ifelse(!eligible, "filtered_low_expression_before_fit",
+                     ifelse(!z$tested, "native_P_withheld",
+                            ifelse(!z$in_BH_family, "independent_filter_low_mean", "tested_with_native_BH")))
+  z$BH_significant <- z$in_BH_family & z$padj < 0.05
+  z$display_DEG <- z$BH_significant & abs(z$log2FoldChange) >= log2(1.15)
+  z$DE_direction <- ifelse(z$display_DEG, ifelse(z$log2FoldChange > 0, "Up", "Down"),
+                           ifelse(z$in_BH_family, "Not significant", "Not in BH family"))
+  z
+}
+
+# Arial figure export. Fonts are supplied by the operating system.
+load_figure_packages <- function(extra = character()) {
+  require_packages(unique(c("grid", "ragg", "svglite", "systemfonts", extra)))
+  stopifnot(capabilities("cairo"))
+  regular <- systemfonts::match_fonts("Arial")
+  bold <- systemfonts::match_fonts("Arial", weight = "bold")
+  paths <- tolower(basename(c(regular$path, bold$path)))
+  if (length(paths) != 2L || !all(grepl("arial", paths))) {
+    stop("Install Arial Regular and Arial Bold before rendering.")
+  }
+}
+
+export_plot <- function(stem, width, height, draw) {
+  grDevices::cairo_pdf(paste0(stem, ".pdf"), width, height, family = "Arial", bg = "white")
+  tryCatch(draw(), finally = grDevices::dev.off())
+  ragg::agg_png(paste0(stem, ".png"), width, height, units = "in", res = 600, background = "white")
+  tryCatch(draw(), finally = grDevices::dev.off())
+  svglite::svglite(paste0(stem, ".svg"), width, height, bg = "white")
+  tryCatch(draw(), finally = grDevices::dev.off())
+}
+
+# 6. Analysis and output
+layout_files <- c(down_layout, up_layout)
+stopifnot(length(layout_files) %in% c(0L, 2L))
+# Draw the down/up gene-category network without panel tags or label backgrounds.
+load_figure_packages(if (length(layout_files) == 0L) "igraph" else character())
 suppressPackageStartupMessages(library(grid))
-if (length(args) == 2L) suppressPackageStartupMessages(library(igraph))
-out <- new_output_dir(args[2])
+if (length(layout_files) == 0L) suppressPackageStartupMessages(library(igraph))
+out <- new_output_dir(figure_dir)
 invisible(Sys.setlocale("LC_COLLATE", "C"))
-nodes <- read_table(file.path(args[1], "display_nodes.csv"))
-edges <- read_table(file.path(args[1], "display_edges.csv"))
+nodes <- read_table(file.path(input_dir, "display_nodes.csv"))
+edges <- read_table(file.path(input_dir, "display_edges.csv"))
 stopifnot(all(edges$edge_type == "gene-category membership"),
           !anyDuplicated(paste(nodes$direction, nodes$node_id)),
           !anyDuplicated(paste(edges$direction, edges$category_id, edges$gene)))
@@ -128,8 +303,8 @@ for (i in seq_along(types)) {
   z <- nodes[nodes$direction == type, , drop = FALSE]
   e <- edges[edges$direction == type, , drop = FALSE]
   stopifnot(nrow(z) > 0L, nrow(e) > 0L, all(c(e$category_id, e$gene) %in% z$node_id))
-  if (length(args) == 4L) {
-    approved <- read_table(args[i + 2L])
+  if (length(layout_files) == 2L) {
+    approved <- read_table(layout_files[i])
     ix <- match(approved$node_id, z$node_id)
     stopifnot(!anyDuplicated(approved$node_id), setequal(z$node_id, approved$node_id),
               all(approved$direction == type), identical(approved$node_type, z$node_type[ix]),

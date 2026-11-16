@@ -1,18 +1,305 @@
-#!/usr/bin/env Rscript
-if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
-  cat("Usage: Rscript upstream/stage1/00_runtime_preflight.R --root STAGE1_DIR --input-dir MATRIX_DIR [--config JSON] [--fontconfig-file FILE]\n")
-  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
-  quit(save = "no", status = 0L)
-}
-.upstream_entry <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1L])
-source(file.path(dirname(dirname(normalizePath(.upstream_entry, mustWork = TRUE))), "script_io.R"))
+# 00 runtime preflight
 
-args <- commandArgs(trailingOnly = TRUE)
-root_arg <- upstream_option('--root', if (length(args) && !startsWith(args[[1L]], '--')) args[[1L]] else NULL)
-root <- upstream_work_directory(root_arg)
-cfgpath <- upstream_processing_configuration(root, upstream_option('--config'))
-if (!requireNamespace('jsonlite', quietly = TRUE)) stop('jsonlite unavailable')
-cfg <- jsonlite::read_json(cfgpath, simplifyVector = FALSE)
+# 1. Packages
+library(jsonlite, include.only = character())
+library(Seurat, include.only = character())
+library(SeuratObject, include.only = character())
+library(SoupX, include.only = character())
+library(scDblFinder, include.only = character())
+library(SingleCellExperiment, include.only = character())
+library(Matrix, include.only = character())
+library(hdf5r, include.only = character())
+library(harmony, include.only = character())
+library(ggplot2, include.only = character())
+library(ggrepel, include.only = character())
+library(patchwork, include.only = character())
+library(ragg, include.only = character())
+library(systemfonts, include.only = character())
+library(uwot, include.only = character())
+library(presto, include.only = character())
+library(xgboost, include.only = character())
+library(future, include.only = character())
+
+# 2. Paths
+input_dir <- "/path/to/matrices"
+work_dir <- "/path/to/work"
+result_dir <- file.path(work_dir, "stage1")
+figure_dir <- result_dir
+fontconfig_file <- NULL
+script_path <- "/path/to/00_runtime_preflight.R"
+
+# 3. Samples and conditions
+sample_cols <- c("WD1", "WD2", "WD3", "Ext1", "Ext2", "Ext3", "Ret-Ext1", "Ret-Ext2", "Ret-Ext3")
+metadata <- data.frame(
+  pool_id = sample_cols,
+  source_sample_id = c("Con1", "Con2", "Con3", "Ext1", "Ext2", "Ext3", "Ret_ext1", "Ret_ext2", "Ret_ext3"),
+  model = rep("Rat IL", 9L),
+  condition = factor(rep(c("WD", "Ext", "Ret-Ext"), each = 3L), levels = c("WD", "Ext", "Ret-Ext")),
+  rats_per_pool = rep(5L, 9L), stringsAsFactors = FALSE)
+
+# 4. Parameters and marker definitions
+processing_settings <- list(
+  `schema_version` = "1.0",
+  `run_id` = "20261101_Manuscript_matched_stage1_01",
+  `stage_gate` = "global_celltype_review",
+  `analysis_seed` = 42L,
+  `threads` = 4L,
+  `samples` = list(
+    list(
+      `sample_id` = "Con1",
+      `condition_label` = "WD"
+    ),
+    list(
+      `sample_id` = "Con2",
+      `condition_label` = "WD"
+    ),
+    list(
+      `sample_id` = "Con3",
+      `condition_label` = "WD"
+    ),
+    list(
+      `sample_id` = "Ext1",
+      `condition_label` = "Ext"
+    ),
+    list(
+      `sample_id` = "Ext2",
+      `condition_label` = "Ext"
+    ),
+    list(
+      `sample_id` = "Ext3",
+      `condition_label` = "Ext"
+    ),
+    list(
+      `sample_id` = "Ret_ext1",
+      `condition_label` = "Ret-Ext"
+    ),
+    list(
+      `sample_id` = "Ret_ext2",
+      `condition_label` = "Ret-Ext"
+    ),
+    list(
+      `sample_id` = "Ret_ext3",
+      `condition_label` = "Ret-Ext"
+    )
+  ),
+  `runtime` = list(
+    `threads` = 4L,
+    `blas_threads` = 1L,
+    `r_libraries` = list(),
+    `fontconfig_file` = NULL,
+    `font_family` = "Arial"
+  ),
+  `initial_eligibility` = list(
+    `method` = "native Seurat CreateSeuratObject on original called counts",
+    `min_cells_per_gene` = 3L,
+    `min_features_per_cell` = 300L,
+    `preserve_all_called_barcode_audit` = TRUE
+  ),
+  `qc` = list(
+    `metric_assay` = "observed original UMI counts",
+    `metric_gene_scope` = "genes retained by native initial min.cells=3/min.features=300 qualification",
+    `nFeature_lower_exclusive` = 700L,
+    `nFeature_upper_exclusive` = 5000L,
+    `nCount_lower_exclusive` = 500L,
+    `nCount_upper_exclusive` = 30000L,
+    `percent_mt_upper_exclusive` = 5L,
+    `log10GenesPerUMI_lower_exclusive` = 0.75,
+    `complexity_formula` = "log10(nFeature) / log10(nCount)",
+    `nonfinite_metrics_fail` = TRUE,
+    `MAD_filters` = FALSE,
+    `mitochondrial_gene_ids` = list(
+      "ENSRNOG00000030644",
+      "ENSRNOG00000031033",
+      "ENSRNOG00000034234",
+      "ENSRNOG00000030371",
+      "ENSRNOG00000033299",
+      "ENSRNOG00000031979",
+      "ENSRNOG00000030700",
+      "ENSRNOG00000033615",
+      "ENSRNOG00000031053",
+      "ENSRNOG00000029707",
+      "ENSRNOG00000029971",
+      "ENSRNOG00000029042",
+      "ENSRNOG00000031766"
+    ),
+    `mitochondrial_symbols` = list(
+      "ND1",
+      "ND2",
+      "COX1",
+      "COX2",
+      "ATP8",
+      "ATP6",
+      "COX3",
+      "ND3",
+      "ND4L",
+      "ND4",
+      "ND5",
+      "ND6",
+      "CYTB"
+    ),
+    `ribo_symbol_pattern` = "^(Rpl|Rps)",
+    `ribo_filter` = FALSE,
+    `corrected_metrics_role` = "audit only; cannot rescue observed-QC failures",
+    `full_GEX_metrics_role` = "diagnostic only; not used for the manuscript thresholds"
+  ),
+  `ambient` = list(
+    `method` = "SoupX",
+    `input` = "fresh original raw/filtered H5, all called barcodes and input genes",
+    `precluster_genes_min` = 200L,
+    `precluster_umi_min` = 300L,
+    `precluster_n_hvg` = 2000L,
+    `precluster_n_pcs` = 30L,
+    `precluster_neighbor_dims` = 20L,
+    `precluster_resolution` = 0.6,
+    `round_to_integer` = TRUE,
+    `rho_review_max` = 0.3,
+    `force_accept` = FALSE,
+    `reuse_previous_analysis_counts` = FALSE
+  ),
+  `doublet` = list(
+    `method` = "scDblFinder",
+    `per_capture` = TRUE,
+    `input` = "corrected counts of initial-qualified genes and observed-QC-passing nuclei",
+    `clusters` = FALSE,
+    `dbr_per_1000` = 0.004,
+    `dbr_denominator` = "original Cell Ranger-called barcode count per capture before initial eligibility and QC",
+    `dbr_sd` = "package default",
+    `xgb_nthreads` = 4L,
+    `BPPARAM` = "SerialParam",
+    `chemistry` = "Chromium GEM-X Single Cell 3 prime v4",
+    `vendor_doublet_calls_role` = "not combined with exclusions"
+  ),
+  `global` = list(
+    `n_hvg` = 2000L,
+    `n_pcs` = 50L,
+    `pc_max` = 30L,
+    `regress_vars` = list(
+      "nCount_RNA",
+      "percent.mt"
+    ),
+    `harmony_group_by` = "sample_id",
+    `regress_condition` = FALSE,
+    `neighbors_k` = 20L,
+    `resolutions` = list(
+      0.1,
+      0.2,
+      0.3,
+      0.4,
+      0.5,
+      0.6,
+      0.7,
+      0.8,
+      0.9,
+      1.0
+    ),
+    `primary_resolution` = 1.0,
+    `umap_n_neighbors` = 30L,
+    `umap_min_dist` = 0.3,
+    `umap_metric` = "cosine",
+    `seed` = 42L,
+    `threads` = 4L,
+    `percent_mt_metadata_source` = "percent_mt_observed in initial-qualified gene set",
+    `annotation_policy` = "fresh clusters; major-cell-type marker review before any lineage subclustering"
+  ),
+  `output_interface` = list(
+    `sample_directory` = "02_qc_doublet/<sample_id>",
+    `singlet_object` = "02_qc_doublet/<sample_id>/singlet_clean.rds",
+    `all_called_QC` = "02_qc_doublet/<sample_id>/all_called_barcodes_QC.csv.gz",
+    `aggregate_summary` = "02_qc_doublet/attrition_summary.csv",
+    `primary_assay` = "RNA: SoupX-corrected integer UMI counts",
+    `audit_assay` = "observed: matching original UMI counts",
+    `metadata_join_key` = "sample_id__10x-barcode",
+    `no_old_embeddings_or_labels` = TRUE
+  ),
+  `input_root` = NULL
+)
+processing_settings$input_root <- input_dir
+processing_settings$runtime["fontconfig_file"] <- list(fontconfig_file)
+processing_settings$samples <- lapply(seq_len(nrow(metadata)), function(i) list(
+  sample_id = metadata$source_sample_id[i], condition_label = as.character(metadata$condition[i])))
+sample_naming <- list(
+  `schema_version` = "1.0",
+  `requested_on` = "2026-11-01",
+  `source_files_read_only` = TRUE,
+  `naming_only_no_count_changes` = TRUE,
+  `cell_id_format` = "<sample_id>__<original_10x_barcode>",
+  `canonical_conditions` = list(
+    "WD",
+    "Ext",
+    "Ret-Ext"
+  ),
+  `sample_map` = list(
+    list(
+      `source_sample_id` = "Con1",
+      `sample_id` = "WD1",
+      `condition_label` = "WD"
+    ),
+    list(
+      `source_sample_id` = "Con2",
+      `sample_id` = "WD2",
+      `condition_label` = "WD"
+    ),
+    list(
+      `source_sample_id` = "Con3",
+      `sample_id` = "WD3",
+      `condition_label` = "WD"
+    ),
+    list(
+      `source_sample_id` = "Ext1",
+      `sample_id` = "Ext1",
+      `condition_label` = "Ext"
+    ),
+    list(
+      `source_sample_id` = "Ext2",
+      `sample_id` = "Ext2",
+      `condition_label` = "Ext"
+    ),
+    list(
+      `source_sample_id` = "Ext3",
+      `sample_id` = "Ext3",
+      `condition_label` = "Ext"
+    ),
+    list(
+      `source_sample_id` = "Ret_ext1",
+      `sample_id` = "Ret-Ext1",
+      `condition_label` = "Ret-Ext"
+    ),
+    list(
+      `source_sample_id` = "Ret_ext2",
+      `sample_id` = "Ret-Ext2",
+      `condition_label` = "Ret-Ext"
+    ),
+    list(
+      `source_sample_id` = "Ret_ext3",
+      `sample_id` = "Ret-Ext3",
+      `condition_label` = "Ret-Ext"
+    )
+  )
+)
+sample_naming$sample_map <- lapply(seq_len(nrow(metadata)), function(i) list(
+  source_sample_id = metadata$source_sample_id[i], sample_id = metadata$pool_id[i],
+  condition_label = as.character(metadata$condition[i])))
+
+# 5. Helper functions
+save_settings <- function(value, filename) {
+  path <- file.path(result_dir, "provenance", filename)
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  if (file.exists(path)) {
+    previous <- jsonlite::read_json(path, simplifyVector = FALSE)
+    if (!isTRUE(all.equal(previous, value, tolerance = 0))) stop("Existing settings differ: ", path)
+  } else {
+    jsonlite::write_json(value, path, pretty = TRUE, auto_unbox = TRUE, null = "null", digits = 17)
+  }
+  path
+}
+
+# 6. Analysis and output
+dir.create(result_dir, recursive = TRUE, showWarnings = FALSE)
+config_snapshot <- save_settings(processing_settings, "processing_settings.json")
+naming_snapshot <- save_settings(sample_naming, "sample_naming.json")
+root <- normalizePath(result_dir, mustWork = TRUE)
+cfgpath <- config_snapshot
+cfg <- processing_settings
 if (!identical(cfg$stage_gate, 'global_celltype_review')) stop('Stage gate is missing')
 libs <- as.character(unlist(cfg$runtime$r_libraries))
 .libPaths(unique(c(libs, .libPaths())))
@@ -25,12 +312,7 @@ inputs <- expand.grid(sample = samples, kind = c('filtered_feature_bc_matrix.h5'
 inputs$path <- file.path(cfg$input_root, inputs$sample, inputs$kind)
 inputs$exists <- file.exists(inputs$path)
 inputs$bytes <- file.info(inputs$path)$size
-parsecheck <- lapply(c('01_process_libraries.R','02_global_celltype.R','03_plot_global_review.R'), function(p) {
-  f <- upstream_script('stage1', p)
-  if (!file.exists(f)) stop('Script missing: ', p)
-  parse(f)
-  list(file = p, parsed = TRUE, md5 = unname(tools::md5sum(f)))
-})
+parsecheck <- list(list(file = script_path, parsed = TRUE, md5 = unname(tools::md5sum(script_path))))
 fonts_conf <- cfg$runtime$fontconfig_file
 if (!is.null(fonts_conf)) {
   stopifnot(file.exists(fonts_conf))

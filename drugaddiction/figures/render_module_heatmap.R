@@ -1,26 +1,308 @@
-#!/usr/bin/env Rscript
-if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
-  cat("Usage: Rscript figures/render_module_heatmap.R EXC_PAYLOAD.rds OUTPUT_DIR\n")
-  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
-  quit(save = "no", status = 0L)
-}
+# render module heatmap
 
+# 1. Packages
+library(Matrix)
+library(grid)
+library(ragg)
+
+# 2. Paths
+work_dir <- "/path/to/work"
+input_file <- file.path(work_dir, "stage3/01_inputs/Excitatory/IEGhigh_payload.rds")
+figure_dir <- file.path(work_dir, "module_heatmap")
+result_dir <- figure_dir
+
+# 3. Samples and conditions
+sample_cols <- c("WD1", "WD2", "WD3", "Ext1", "Ext2", "Ext3", "Ret-Ext1", "Ret-Ext2", "Ret-Ext3")
+metadata <- data.frame(
+  pool_id = sample_cols,
+  source_sample_id = c("Con1", "Con2", "Con3", "Ext1", "Ext2", "Ext3", "Ret_ext1", "Ret_ext2", "Ret_ext3"),
+  model = rep("Rat IL", 9L),
+  condition = factor(rep(c("WD", "Ext", "Ret-Ext"), each = 3L), levels = c("WD", "Ext", "Ret-Ext")),
+  rats_per_pool = rep(5L, 9L), stringsAsFactors = FALSE)
+
+# 4. Parameters and marker definitions
+fixed_module_genes <- data.frame(
+  `gene_order` = c(
+    1L,
+    2L,
+    3L,
+    4L,
+    5L,
+    6L,
+    7L,
+    8L,
+    9L,
+    10L,
+    11L,
+    12L,
+    13L,
+    14L,
+    15L,
+    16L,
+    17L,
+    18L,
+    19L,
+    20L,
+    21L,
+    22L,
+    23L,
+    24L,
+    25L,
+    26L,
+    27L,
+    28L,
+    29L,
+    30L,
+    31L,
+    32L,
+    33L,
+    34L,
+    35L,
+    36L,
+    37L,
+    38L,
+    39L,
+    40L,
+    41L,
+    42L,
+    43L,
+    44L
+  ),
+  `module_id` = c(
+    "M1",
+    "M1",
+    "M1",
+    "M1",
+    "M2",
+    "M2",
+    "M2",
+    "M2",
+    "M3",
+    "M3",
+    "M3",
+    "M3",
+    "M3",
+    "M3",
+    "M3",
+    "M3",
+    "M3",
+    "M3",
+    "M3",
+    "M4",
+    "M4",
+    "M4",
+    "M4",
+    "M4",
+    "M4",
+    "M4",
+    "M5",
+    "M5",
+    "M5",
+    "M5",
+    "M5",
+    "M5",
+    "M5",
+    "M5",
+    "M5",
+    "M6",
+    "M6",
+    "M6",
+    "M6",
+    "M6",
+    "M6",
+    "M6",
+    "M6",
+    "M6"
+  ),
+  `gene` = c(
+    "Ece1",
+    "Kif1a",
+    "Ptprn",
+    "Scg2",
+    "Per1",
+    "Pmepa1",
+    "Kdm6b",
+    "Nr4a3",
+    "Robo1",
+    "Sema5a",
+    "Nrp1",
+    "Efna5",
+    "Ntrk2",
+    "Reln",
+    "Lrrtm3",
+    "Clstn2",
+    "Opcml",
+    "Mdga2",
+    "Cdh2",
+    "Cntnap4",
+    "Braf",
+    "Pde1a",
+    "Pde3b",
+    "Mapk8",
+    "Rims1",
+    "Gnaq",
+    "Mapk1",
+    "Mapk10",
+    "Itpr1",
+    "Gabra5",
+    "Gabrb1",
+    "Grm3",
+    "Grm8",
+    "Grik3",
+    "Grin2b",
+    "Gnai1",
+    "Gng12",
+    "Adora1",
+    "Kcnj6",
+    "Pde4d",
+    "Adcy1",
+    "Adcy3",
+    "Adcy9",
+    "Adcy5"
+  ),
+  stringsAsFactors = FALSE, check.names = FALSE
+)
+heatmap_palette <- data.frame(
+  `position` = c(
+    0.0,
+    0.0166666666666667,
+    0.0333333333333333,
+    0.05,
+    0.0666666666666667,
+    0.0833333333333333,
+    0.1,
+    0.116666666666667,
+    0.133333333333333,
+    0.15,
+    0.166666666666667,
+    0.183333333333333,
+    0.2,
+    0.216666666666667,
+    0.233333333333333,
+    0.25,
+    0.266666666666667,
+    0.283333333333333,
+    0.3,
+    0.316666666666667,
+    0.333333333333333,
+    0.35,
+    0.366666666666667,
+    0.383333333333333,
+    0.4,
+    0.416666666666667,
+    0.433333333333333,
+    0.45,
+    0.466666666666667,
+    0.483333333333333,
+    0.5,
+    0.516666666666667,
+    0.533333333333333,
+    0.55,
+    0.566666666666667,
+    0.583333333333333,
+    0.6,
+    0.616666666666667,
+    0.633333333333333,
+    0.65,
+    0.666666666666667,
+    0.683333333333333,
+    0.7,
+    0.716666666666667,
+    0.733333333333333,
+    0.75,
+    0.766666666666667,
+    0.783333333333333,
+    0.8,
+    0.816666666666667,
+    0.833333333333333,
+    0.85,
+    0.866666666666667,
+    0.883333333333333,
+    0.9,
+    0.916666666666667,
+    0.933333333333333,
+    0.95,
+    0.966666666666667,
+    0.983333333333333,
+    1.0
+  ),
+  `hex` = c(
+    "#4090F4",
+    "#4792F0",
+    "#4D93EC",
+    "#5395E8",
+    "#5997E4",
+    "#6098E0",
+    "#669ADC",
+    "#6D9CD8",
+    "#739DD4",
+    "#7A9FD0",
+    "#80A0CD",
+    "#87A2C8",
+    "#8DA3C4",
+    "#94A5C1",
+    "#9AA7BD",
+    "#A0A8B9",
+    "#A7AAB5",
+    "#ADABB1",
+    "#B4ADAD",
+    "#BAAFA9",
+    "#C0B0A5",
+    "#C7B2A1",
+    "#CDB39D",
+    "#D4B59A",
+    "#DAB796",
+    "#E1B892",
+    "#E7BA8E",
+    "#EEBB8A",
+    "#F4BD86",
+    "#FABE82",
+    "#FEBD7E",
+    "#FDB77A",
+    "#FCB176",
+    "#FBAB72",
+    "#FAA56E",
+    "#F99F6A",
+    "#F89966",
+    "#F89362",
+    "#F78C5E",
+    "#F6865A",
+    "#F58055",
+    "#F47A51",
+    "#F3744D",
+    "#F26E49",
+    "#F16845",
+    "#F06241",
+    "#EF5C3D",
+    "#EE5639",
+    "#ED4F35",
+    "#EC4931",
+    "#EB432D",
+    "#EA3D29",
+    "#E93725",
+    "#E83121",
+    "#E72B1C",
+    "#E62519",
+    "#E51F14",
+    "#E41910",
+    "#E3120C",
+    "#E30D08",
+    "#E20604"
+  ),
+  stringsAsFactors = FALSE, check.names = FALSE
+)
+
+# 6. Analysis and output
 # Fixed-list expression display. The panel is not a differential-expression test.
-args <- commandArgs(TRUE)
-if (length(args) != 2L) {
-  stop("Usage: Rscript render_module_heatmap.R EXCITATORY_IEGHIGH_PAYLOAD.rds OUTPUT_DIR")
-}
-script <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])
-config <- file.path(dirname(normalizePath(script, mustWork = TRUE)), "config")
 suppressPackageStartupMessages({library(Matrix); library(grid); library(ragg)})
 if (!capabilities("cairo")) stop("Cairo support is required for PDF export.")
-genes <- read.csv(file.path(config, "fixed_module_genes.csv"), stringsAsFactors = FALSE)
-palette <- read.csv(file.path(config, "heatmap_palette.csv"), stringsAsFactors = FALSE)
+genes <- fixed_module_genes
+palette <- heatmap_palette
 stopifnot(identical(genes$gene_order, seq_len(44L)), !anyDuplicated(genes$gene),
   identical(as.integer(table(factor(genes$module_id, levels = paste0("M", 1:6)))),
             c(4L, 4L, 11L, 7L, 9L, 9L)),
   nrow(palette) == 61L, all(diff(palette$position) > 0))
-p <- readRDS(args[1])
+p <- readRDS(input_file)
 stopifnot(all(c("normalized", "metadata") %in% names(p)),
   identical(colnames(p$normalized), as.character(p$metadata$Cell)),
   all(p$metadata$IEGhigh), all(p$metadata$neuron_type == "Excitatory"),
@@ -94,7 +376,7 @@ draw <- function() {
   }
   grid.text("Relative Expression", 578/687, by+bh/2, rot = 90, gp = gpar(fontsize = 16))
 }
-out <- args[2]
+out <- figure_dir
 if (dir.exists(out) && length(list.files(out, all.files = TRUE, no.. = TRUE))) {
   stop("Use an empty output directory.")
 }

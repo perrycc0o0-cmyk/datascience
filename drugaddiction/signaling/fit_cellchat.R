@@ -1,13 +1,29 @@
-#!/usr/bin/env Rscript
-if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
-  cat("Usage: Rscript signaling/fit_cellchat.R --root STAGE3_DIR\n")
-  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
-  quit(save = "no", status = 0L)
-}
+# fit cellchat
 
+# 1. Packages
+library(CellChat, include.only = character())
+library(Matrix, include.only = character())
+library(digest, include.only = character())
+library(jsonlite, include.only = character())
+library(future, include.only = character())
+
+# 2. Paths
+work_dir <- "/path/to/work"
+result_dir <- file.path(work_dir, "stage3")
+script_path <- "/path/to/fit_cellchat.R"
+figure_dir <- file.path(result_dir, "figures")
+
+# 3. Samples and conditions
+sample_cols <- c("WD1", "WD2", "WD3", "Ext1", "Ext2", "Ext3", "Ret-Ext1", "Ret-Ext2", "Ret-Ext3")
+metadata <- data.frame(
+  pool_id = sample_cols,
+  source_sample_id = c("Con1", "Con2", "Con3", "Ext1", "Ext2", "Ext3", "Ret_ext1", "Ret_ext2", "Ret_ext3"),
+  model = rep("Rat IL", 9L),
+  condition = factor(rep(c("WD", "Ext", "Ret-Ext"), each = 3L), levels = c("WD", "Ext", "Ret-Ext")),
+  rats_per_pool = rep(5L, 9L), stringsAsFactors = FALSE)
+
+# 6. Analysis and output
 # Fit abundance-weighted neuronal CellChat networks.
-# Entry: Rscript --vanilla fit_cellchat.R --root <new run root>
-# source() defines functions only. All result writes remain inside 06_CellChat.
 
 .cc_stop <- function(...) stop(..., call. = FALSE)
 .cc_atomic_json <- function(x, path) {
@@ -393,7 +409,7 @@ run_clean_cellchat <- function(root) {
   if (!all(file.exists(input_paths))) .cc_stop("Both frozen IEG-high payloads are required")
   input_hashes <- lapply(input_paths, .cc_hash, file = TRUE)
   contract <- list(schema_version = "1.0", R_version = as.character(getRversion()), CellChat_version = "1.6.1",
-    script_sha256 = .cc_hash(sub("^--file=", "", grep("^--file=", commandArgs(), value = TRUE)[1L]), file = TRUE),
+    script_sha256 = .cc_hash(script_path, file = TRUE),
     DB = "CellChatDB.human", DB_sha256_serialized = .cc_hash(db), db_expanded_genes = expanded,
     input_paths = as.list(input_paths), input_sha256 = input_hashes, api_defaults = .cc_defaults(api_names),
     actual_parameters = list(OE_only_pos = TRUE, OE_thresh_pc = 0, OE_thresh_fc = 0, OE_thresh_p = 0.05,
@@ -448,16 +464,8 @@ run_clean_cellchat <- function(root) {
   invisible(manifest)
 }
 
-.cc_main <- function() {
-  args <- commandArgs(trailingOnly = TRUE)
-  at <- match("--root", args)
-  if (is.na(at) || at == length(args)) .cc_stop("Usage: fit_cellchat.R --root <new run root>")
-  root <- args[at + 1L]
-  tryCatch(run_clean_cellchat(root), error = function(e) {
-    if (requireNamespace("jsonlite", quietly = TRUE)) .cc_atomic_json(
-      list(status = "failed", failed_UTC = .cc_utc(), error = conditionMessage(e)),
-      file.path(root, "06_CellChat", "execution_failure.json"))
-    stop(e)
-  })
-}
-if (sys.nframe() == 0L) .cc_main()
+tryCatch(run_clean_cellchat(result_dir), error = function(e) {
+  .cc_atomic_json(list(status = "failed", failed_UTC = .cc_utc(), error = conditionMessage(e)),
+                  file.path(result_dir, "06_CellChat", "execution_failure.json"))
+  stop(e)
+})

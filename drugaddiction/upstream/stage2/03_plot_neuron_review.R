@@ -1,12 +1,552 @@
-#!/usr/bin/env Rscript
-if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
-  cat("Usage: Rscript upstream/stage2/03_plot_neuron_review.R --root STAGE2_DIR [--runtime-config JSON] [--output-name REVISION]\n")
-  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
-  quit(save = "no", status = 0L)
-}
-.upstream_entry <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1L])
-source(file.path(dirname(dirname(normalizePath(.upstream_entry, mustWork = TRUE))), "script_io.R"))
+# 03 plot neuron review
 
+# 1. Packages
+library(jsonlite, include.only = character())
+library(ggplot2, include.only = character())
+library(ggrepel, include.only = character())
+library(patchwork, include.only = character())
+library(ragg, include.only = character())
+library(Matrix, include.only = character())
+library(scales, include.only = character())
+
+# 2. Paths
+input_dir <- "/path/to/matrices"
+work_dir <- "/path/to/work"
+result_dir <- file.path(work_dir, "stage2")
+figure_dir <- result_dir
+fontconfig_file <- NULL
+script_path <- "/path/to/03_plot_neuron_review.R"
+stage1_dir <- file.path(work_dir, "stage1")
+output_name <- "04_marker_review"
+
+# 3. Samples and conditions
+sample_cols <- c("WD1", "WD2", "WD3", "Ext1", "Ext2", "Ext3", "Ret-Ext1", "Ret-Ext2", "Ret-Ext3")
+metadata <- data.frame(
+  pool_id = sample_cols,
+  source_sample_id = c("Con1", "Con2", "Con3", "Ext1", "Ext2", "Ext3", "Ret_ext1", "Ret_ext2", "Ret_ext3"),
+  model = rep("Rat IL", 9L),
+  condition = factor(rep(c("WD", "Ext", "Ret-Ext"), each = 3L), levels = c("WD", "Ext", "Ret-Ext")),
+  rats_per_pool = rep(5L, 9L), stringsAsFactors = FALSE)
+
+# 4. Parameters and marker definitions
+neuron_settings <- list(
+  `schema_version` = "1.0",
+  `run_id` = "20261101_Manuscript_matched_stage2_01",
+  `stage_gate` = "neuron_subtype_review",
+  `source_class_column` = "major_class_six",
+  `keep_previously_forced_clusters` = TRUE,
+  `do_not_refilter` = TRUE,
+  `analysis_seed` = 42L,
+  `runtime` = list(
+    `threads` = 4L,
+    `blas_threads` = 1L,
+    `r_libraries` = list(),
+    `fontconfig_file` = NULL,
+    `font_family` = "Arial"
+  ),
+  `processing` = list(
+    `assay` = "RNA",
+    `counts_basis` = "Existing SoupX-corrected integer UMI counts; original observed counts retained separately",
+    `normalization` = "LogNormalize",
+    `scale_factor` = 10000L,
+    `hvg_method` = "vst",
+    `n_hvg` = 2000L,
+    `scale_vars_to_regress` = list(),
+    `pca_components_max` = 100L,
+    `harmony_pca_dimensions_max` = 30L,
+    `harmony_group_by` = "sample_id",
+    `harmony_max_iter` = 10L,
+    `harmony_project_dim` = FALSE,
+    `neighbor_harmony_dimensions_max` = 19L,
+    `clustering_algorithm` = 1L,
+    `resolution` = 0.5,
+    `umap_engine` = "uwot::umap",
+    `umap_metric` = "cosine",
+    `umap_repulsion_strength` = 1L,
+    `umap_sgd_threads` = 1L
+  ),
+  `lineages` = list(
+    list(
+      `id` = "Exc",
+      `source_class` = "Excitatory",
+      `expected_nuclei` = 62991L,
+      `output_directory` = "01_Exc",
+      `neighbors_k` = 20L,
+      `umap_n_neighbors` = 10L,
+      `umap_min_dist` = 0.8,
+      `umap_spread` = 6L
+    ),
+    list(
+      `id` = "Inh",
+      `source_class` = "Inhibitory",
+      `expected_nuclei` = 21693L,
+      `output_directory` = "02_Inh",
+      `neighbors_k` = 30L,
+      `umap_n_neighbors` = 30L,
+      `umap_min_dist` = 0.3,
+      `umap_spread` = 1L
+    )
+  ),
+  `annotation_marker_discovery` = list(
+    `test` = "wilcox",
+    `min_pct` = 0.25,
+    `logfc_threshold` = 0.25,
+    `max_cells_per_ident` = 1000L,
+    `only_pos` = FALSE,
+    `return_thresh` = 1L,
+    `purpose` = "Annotation markers only, not between-condition DE"
+  ),
+  `parent_stage1_root` = NULL,
+  `input_rds` = NULL
+)
+neuron_settings$parent_stage1_root <- stage1_dir
+neuron_settings$input_rds <- file.path(stage1_dir, "05_six_class_review", "global_celltype_six_class.rds")
+neuron_settings$runtime["fontconfig_file"] <- list(fontconfig_file)
+marker_settings <- list(
+  `schema_version` = "1.0",
+  `purpose` = "Fresh neuronal subcluster marker review; existing label vocabulary without any historical numeric cluster mapping",
+  `reference_doi` = "10.1038/s41467-024-50465-z",
+  `reference_notes_physical_pages` = list(
+    54L,
+    58L,
+    59L,
+    60L
+  ),
+  `annotation_is_reference_label_transfer` = FALSE,
+  `annotation_is_probability` = FALSE,
+  `display_excluded_genes` = list(
+    "Reln",
+    "Slco1c1",
+    "Slc30a3"
+  ),
+  `lineage_review_markers` = list(
+    "Slc17a6",
+    "Gad1",
+    "Gad2",
+    "Slc17a7",
+    "Snap25"
+  ),
+  `review_colors` = list(
+    `Unknown` = "#6B7280"
+  ),
+  `lineages` = list(
+    `Exc` = list(
+      `name` = "Excitatory",
+      `display_scheme` = "B",
+      `order` = list(
+        "GLU_L6_CLA",
+        "GLU_L5_6",
+        "GLU_L2_L3",
+        "GLU_L5",
+        "GLU_L4_5",
+        "GLU_ADGM"
+      ),
+      `display_panels` = list(
+        `GLU_L6_CLA` = list(
+          "Gng2",
+          "Cck"
+        ),
+        `GLU_L5_6` = list(
+          "Syt6",
+          "Thsd7b"
+        ),
+        `GLU_L2_L3` = list(
+          "Glis3",
+          "Plk5"
+        ),
+        `GLU_L5` = list(
+          "Parm1",
+          "Trpc7"
+        ),
+        `GLU_L4_5` = list(
+          "Il1rapl2",
+          "Rorb"
+        ),
+        `GLU_ADGM` = list(
+          "Rerg",
+          "Arhgap6"
+        )
+      ),
+      `annotation_panels` = list(
+        `GLU_L6_CLA` = list(
+          `genes` = list(
+            "Synpr",
+            "Nr4a2",
+            "Gng2"
+          ),
+          `use_for_identity_signature` = TRUE
+        ),
+        `GLU_L5_6` = list(
+          `genes` = list(
+            "Syt6",
+            "Foxp2",
+            "Tle4",
+            "Thsd7b"
+          ),
+          `use_for_identity_signature` = TRUE
+        ),
+        `GLU_L2_L3` = list(
+          `genes` = list(
+            "Glis3",
+            "Rasgrf2",
+            "Ccbe1",
+            "Otof"
+          ),
+          `use_for_identity_signature` = TRUE
+        ),
+        `GLU_L5` = list(
+          `genes` = list(
+            "Parm1",
+            "Serpine2",
+            "Bcl11b"
+          ),
+          `use_for_identity_signature` = TRUE
+        ),
+        `GLU_L4_5` = list(
+          `genes` = list(
+            "Rorb",
+            "Thsd7a",
+            "Il1rapl2"
+          ),
+          `use_for_identity_signature` = TRUE
+        ),
+        `GLU_ADGM` = list(
+          `genes` = list(
+            "Arhgap6",
+            "Rerg",
+            "Pkp2",
+            "Rfx3"
+          ),
+          `use_for_identity_signature` = TRUE
+        )
+      ),
+      `context_markers` = list(
+        `GLU_L6_CLA` = list(
+          "Gng2",
+          "Synpr",
+          "Nr4a2",
+          "Lxn"
+        ),
+        `GLU_L5_6` = list(
+          "Syt6",
+          "Foxp2",
+          "Tle4",
+          "Thsd7b",
+          "Vwc2l",
+          "Tshz2"
+        ),
+        `GLU_L2_L3` = list(
+          "Glis3",
+          "Otof",
+          "Rasgrf2",
+          "Ccbe1",
+          "Cux2"
+        ),
+        `GLU_L5` = list(
+          "Parm1",
+          "Serpine2",
+          "Bcl11b"
+        ),
+        `GLU_L4_5` = list(
+          "Il1rapl2",
+          "Rorb",
+          "Thsd7a"
+        ),
+        `GLU_ADGM` = list(
+          "Rerg",
+          "Arhgap6",
+          "Pkp2",
+          "Rfx3"
+        )
+      ),
+      `colors` = list(
+        `GLU_L6_CLA` = "#8DD3C7",
+        `GLU_L5_6` = "#FFFFB3",
+        `GLU_L2_L3` = "#BEBADA",
+        `GLU_L5` = "#FB8072",
+        `GLU_L4_5` = "#80B1D3",
+        `GLU_ADGM` = "#FDB462",
+        `Unknown` = "#6B7280"
+      ),
+      `scientific_cautions` = list(
+        "Cck, Plk5 and Trpc7 are descriptive display candidates, not independent identity anchors.",
+        "The L6/CLA-associated panel does not prove anatomical claustrum identity or a specific projection.",
+        "Vwc2l and Tshz2 describe an adjacent broad deep-layer program; the whole GLU_L5_6 label is not automatically corticothalamic.",
+        "Cux2 and Lxn are review context rather than additional author-curated primary identity seeds; missing or weak expression remains visible in source data."
+      )
+    ),
+    `Inh` = list(
+      `name` = "Inhibitory",
+      `display_scheme` = "A",
+      `order` = list(
+        "GABA_Amb",
+        "GABA_Etv1",
+        "GABA_Lamp5",
+        "GABA_MSN",
+        "GABA_Sst",
+        "GABA_Hs3st2",
+        "GABA_Pvalb",
+        "GABA_Vip"
+      ),
+      `display_panels` = list(
+        `GABA_Amb` = list(
+          "Slc17a6"
+        ),
+        `GABA_Etv1` = list(
+          "Etv1"
+        ),
+        `GABA_Lamp5` = list(
+          "Lamp5",
+          "Jam2"
+        ),
+        `GABA_MSN` = list(
+          "Rgs9",
+          "Rarb"
+        ),
+        `GABA_Sst` = list(
+          "Sst"
+        ),
+        `GABA_Hs3st2` = list(
+          "Hs3st2"
+        ),
+        `GABA_Pvalb` = list(
+          "Pvalb",
+          "Slit2"
+        ),
+        `GABA_Vip` = list(
+          "Vip"
+        )
+      ),
+      `annotation_panels` = list(
+        `GABA_Amb` = list(
+          `genes` = list(
+            "Slc17a6",
+            "Glra3"
+          ),
+          `use_for_identity_signature` = FALSE
+        ),
+        `GABA_Etv1` = list(
+          `genes` = list(
+            "Etv1",
+            "Pde3a",
+            "Eya1",
+            "Dpf3"
+          ),
+          `use_for_identity_signature` = TRUE
+        ),
+        `GABA_Lamp5` = list(
+          `genes` = list(
+            "Jam2",
+            "Lamp5",
+            "Sv2c",
+            "Reln"
+          ),
+          `use_for_identity_signature` = TRUE
+        ),
+        `GABA_MSN` = list(
+          `genes` = list(
+            "Rgs9",
+            "Rarb",
+            "Gng7"
+          ),
+          `use_for_identity_signature` = TRUE
+        ),
+        `GABA_Sst` = list(
+          `genes` = list(
+            "Sst",
+            "Nos1",
+            "Npy",
+            "Chodl"
+          ),
+          `use_for_identity_signature` = TRUE
+        ),
+        `GABA_Hs3st2` = list(
+          `genes` = list(
+            "Col5a2",
+            "Hs3st2",
+            "Vipr2"
+          ),
+          `use_for_identity_signature` = TRUE
+        ),
+        `GABA_Pvalb` = list(
+          `genes` = list(
+            "Pvalb",
+            "Slit2",
+            "Eya4",
+            "Esrrg",
+            "Rspo2"
+          ),
+          `use_for_identity_signature` = TRUE
+        ),
+        `GABA_Vip` = list(
+          `genes` = list(
+            "Vip"
+          ),
+          `use_for_identity_signature` = TRUE
+        )
+      ),
+      `context_markers` = list(
+        `GABA_Amb` = list(
+          "Slc17a6",
+          "Glra3",
+          "Gad1",
+          "Gad2",
+          "Slc17a7"
+        ),
+        `GABA_Etv1` = list(
+          "Etv1",
+          "Pde3a",
+          "Eya1",
+          "Dpf3"
+        ),
+        `GABA_Lamp5` = list(
+          "Lamp5",
+          "Reln",
+          "Jam2",
+          "Sv2c"
+        ),
+        `GABA_MSN` = list(
+          "Gng7",
+          "Rgs9",
+          "Rarb",
+          "Ppp1r1b",
+          "Drd2"
+        ),
+        `GABA_Sst` = list(
+          "Sst",
+          "Nos1",
+          "Npy",
+          "Chodl",
+          "Grik3",
+          "Elfn1",
+          "Lypd6"
+        ),
+        `GABA_Hs3st2` = list(
+          "Hs3st2",
+          "Col5a2",
+          "Vipr2"
+        ),
+        `GABA_Pvalb` = list(
+          "Pvalb",
+          "Slit2",
+          "Eya4",
+          "Rspo2",
+          "Esrrg"
+        ),
+        `GABA_Vip` = list(
+          "Vip"
+        )
+      ),
+      `colors` = list(
+        `GABA_Amb` = "#66C2A5",
+        `GABA_Etv1` = "#FC8D62",
+        `GABA_Lamp5` = "#8DA0CB",
+        `GABA_MSN` = "#E78AC3",
+        `GABA_Sst` = "#A6D854",
+        `GABA_Hs3st2` = "#FFD92F",
+        `GABA_Pvalb` = "#E5C494",
+        `GABA_Vip` = "#FF6347",
+        `Unknown` = "#6B7280"
+      ),
+      `scientific_cautions` = list(
+        "GABA_Amb is an unresolved display container; Slc17a6 is not proof of inhibitory identity and this panel does not compete as a validated signature.",
+        "Retain the original global cluster26 and lineage-conflict flags for explicit review after fresh subclustering.",
+        "Drd2 and Ppp1r1b support only part of the reference MSN program, not every MSN sourcecluster.",
+        "Grik3, Elfn1 and Lypd6 describe a neighboring Sst-associated reference program, not the full primary Sst program.",
+        "Slit2 alone does not independently prove Pvalb identity; Vip has no invented second exclusive author-curated marker.",
+        "Reln is omitted only from displayed panels, not removed from RNA or annotation evidence."
+      )
+    )
+  ),
+  `style` = list(
+    `backend` = "R",
+    `font_family` = "Arial",
+    `png_dpi` = 600L,
+    `font_sizes` = list(
+      `base` = 8L,
+      `axis` = 7.5,
+      `title` = 9L,
+      `legend` = 6.5,
+      `tag` = 10L
+    ),
+    `colors` = list(
+      "#EEEEEE",
+      "#E5E5E5",
+      "#F4ACB8",
+      "#DA304F",
+      "#A60F2D"
+    ),
+    `color_knots` = list(
+      -2.5,
+      0L,
+      0.5,
+      1.5,
+      2.5
+    ),
+    `color_limits` = list(
+      -2.5,
+      2.5
+    ),
+    `color_space` = "Lab",
+    `point_area_mapping` = "area proportional to percent expressed",
+    `max_group_point_mm` = 6.5,
+    `max_cluster_point_mm` = 4L,
+    `hide_below_detection_percent` = 5L,
+    `size_limits` = list(
+      0L,
+      100L
+    ),
+    `size_breaks` = list(
+      25L,
+      50L,
+      75L
+    ),
+    `umap_label_mm` = 2.6,
+    `umap_raster_pointsize` = 1.2,
+    `umap_raster_pixels` = 1200L,
+    `umap_vector_point_mm` = 0.09,
+    `numeric_cluster_ramp` = list(
+      "#1E3A8A",
+      "#DC2626",
+      "#059669",
+      "#7C2D12",
+      "#6D28D9",
+      "#0F766E",
+      "#BE185D",
+      "#374151",
+      "#D97706",
+      "#0369A1",
+      "#4F46E5",
+      "#A16207"
+    ),
+    `single_panels_untagged` = TRUE,
+    `combined_tags` = "uppercase"
+  ),
+  `scientific_cautions` = list(
+    "The reference is a rat brain single-nucleus study, not a normal IL-specific truth set or executed label transfer.",
+    "Copy marker vocabulary and colors only; do not transfer historical numeric cluster assignments to fresh clusters.",
+    "Candidate annotation remains pending human review; retain Unknown when evidence is insufficient or conflicting.",
+    "Marker selection and clustering in the same data are descriptive, not independent anatomical or projection validation."
+  )
+)
+
+# 5. Helper functions
+save_settings <- function(value, filename) {
+  path <- file.path(result_dir, "provenance", filename)
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  if (file.exists(path)) {
+    previous <- jsonlite::read_json(path, simplifyVector = FALSE)
+    if (!isTRUE(all.equal(previous, value, tolerance = 0))) stop("Existing settings differ: ", path)
+  } else {
+    jsonlite::write_json(value, path, pretty = TRUE, auto_unbox = TRUE, null = "null", digits = 17)
+  }
+  path
+}
+
+# 6. Analysis and output
+dir.create(result_dir, recursive = TRUE, showWarnings = FALSE)
+config_snapshot <- save_settings(neuron_settings, "neuron_settings.json")
+marker_snapshot <- save_settings(marker_settings, "marker_settings.json")
 # Render saved neuronal-subcluster annotation review only; never fit or relabel.
 
 nr_flat <- function(x) as.character(unlist(x, use.names = FALSE))
@@ -29,7 +569,7 @@ neuron_review_plot_main <- function(root, runtime_config = NULL, output_name = "
   root <- normalizePath(root, winslash = "/", mustWork = TRUE)
   if (!requireNamespace("jsonlite", quietly = TRUE)) stop("jsonlite is required")
   if (!is.null(runtime_config)) {
-    rt <- jsonlite::read_json(runtime_config, simplifyVector = FALSE)
+    rt <- neuron_settings
     if (!is.null(rt$runtime$r_libraries)) .libPaths(unique(c(nr_flat(rt$runtime$r_libraries), .libPaths())))
     if (!is.null(rt$runtime$fontconfig_file)) Sys.setenv(FONTCONFIG_FILE = rt$runtime$fontconfig_file)
   }
@@ -45,7 +585,7 @@ neuron_review_plot_main <- function(root, runtime_config = NULL, output_name = "
     stop("Arial was not resolved: ", paste(font, collapse = " "))
   if (requireNamespace("showtext", quietly = TRUE)) showtext::showtext_auto(FALSE)
   config <- file.path(root, "config", "subtype_markers_and_style.json")
-  cfg <- jsonlite::read_json(config, simplifyVector = FALSE)
+  cfg <- marker_settings
   style <- cfg$style
   if (!identical(style$backend, "R")) stop("This renderer is R-only")
   if (length(output_name) != 1L || !grepl("^[A-Za-z0-9_]+$", output_name)) stop("Invalid output directory")
@@ -301,16 +841,4 @@ neuron_review_plot_main <- function(root, runtime_config = NULL, output_name = "
   invisible(final)
 }
 
-if (sys.nframe() == 0L) {
-  a <- commandArgs(trailingOnly = TRUE)
-  if (length(a) < 2L || a[1L] != "--root")
-    stop("Usage: Rscript 03_plot_neuron_review.R --root RUN_ROOT [--runtime-config JSON] [--output-name REVISION]")
-  opt <- function(flag, default = NULL) {
-    j <- match(flag, a)
-    if (is.na(j)) return(default)
-    if (j == length(a)) stop("Missing value for ", flag)
-    a[j + 1L]
-  }
-  cp <- upstream_neuron_configuration(upstream_work_directory(a[2L]), opt("--runtime-config"))
-  neuron_review_plot_main(a[2L], runtime_config = cp, output_name = opt("--output-name", "04_marker_review"))
-}
+neuron_review_plot_main(result_dir, runtime_config = config_snapshot, output_name = output_name)

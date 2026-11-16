@@ -1,16 +1,31 @@
-#!/usr/bin/env Rscript
-if (sys.nframe() == 0L && any(commandArgs(TRUE) %in% c("--help", "-h"))) {
-  cat("Usage: Rscript signaling/fit_binomial_models.R NEURON_METADATA.csv STAGE3_DIR\n")
-  cat("Run this script directly; supply its saved inputs. No workflow launcher is required.\n")
-  quit(save = "no", status = 0L)
-}
+# fit binomial models
 
+# 1. Packages
+library(lme4)
+library(jsonlite)
+library(digest)
+
+# 2. Paths
+work_dir <- "/path/to/work"
+neuron_metadata <- file.path(work_dir, "stage3/01_inputs/neuron_metadata.csv")
+result_dir <- file.path(work_dir, "stage3")
+bootstrap_workers <- 1L
+figure_dir <- file.path(result_dir, "figures")
+script_path <- "/path/to/fit_binomial_models.R"
+
+# 3. Samples and conditions
+sample_cols <- c("WD1", "WD2", "WD3", "Ext1", "Ext2", "Ext3", "Ret-Ext1", "Ret-Ext2", "Ret-Ext3")
+metadata <- data.frame(
+  pool_id = sample_cols,
+  source_sample_id = c("Con1", "Con2", "Con3", "Ext1", "Ext2", "Ext3", "Ret_ext1", "Ret_ext2", "Ret_ext3"),
+  model = rep("Rat IL", 9L),
+  condition = factor(rep(c("WD", "Ext", "Ret-Ext"), each = 3L), levels = c("WD", "Ext", "Ret-Ext")),
+  rats_per_pool = rep(5L, 9L), stringsAsFactors = FALSE)
+
+# 6. Analysis and output
 # Binomial mixed models on new accepted IEG-high count summaries.
-args <- commandArgs(TRUE)
-if (length(args) != 2L) stop("Usage: Rscript fit_binomial_models.R NEURON_METADATA.csv RUN_ROOT")
-metadata_path <- normalizePath(args[1L], mustWork = TRUE)
-root <- normalizePath(args[2L], mustWork = TRUE)
-script_dir <- dirname(normalizePath(sub("^--file=", "", grep("^--file=", commandArgs(), value = TRUE)[1L])))
+metadata_path <- normalizePath(neuron_metadata, mustWork = TRUE)
+root <- normalizePath(result_dir, mustWork = TRUE)
 Sys.setenv(OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1")
 suppressPackageStartupMessages({library(lme4); library(jsonlite); library(digest)})
 out <- file.path(root,"04_proportions_GLMM")
@@ -46,11 +61,72 @@ for (panel in names(orders)) for (subtype in orders[[panel]]) {
   datasets[[paste(panel,subtype,sep="|")]] <- d
 }
 B <- 1999L; AGQ <- 15L
-# Import only audited model helper definitions, never the historical runner or data.
-helper <- file.path(script_dir,"binomial_model_helpers.R")
-allowed <- c("control","form_full","form_null","fit_model","fit_pair","true_integral_ll")
-for (e in parse(helper)) if (is.call(e) && is.symbol(e[[1]]) && as.character(e[[1]]) %in% c("<-","=") &&
-    is.symbol(e[[2]]) && as.character(e[[2]]) %in% allowed) eval(e)
+# Standard pooled-sample binomial model fitting and quadrature checks.
+control <- glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=100000),
+  check.nobs.vs.nlev="ignore",check.nobs.vs.nRE="ignore",check.rankX="stop.deficient")
+form_full <- cbind(numerator,denominator-numerator) ~ condition + (1|pool_id)
+form_null <- cbind(numerator,denominator-numerator) ~ 1 + (1|pool_id)
+
+fit_model <- function(d,full=TRUE,agq=AGQ) {
+  warnings <- messages <- character()
+  fit <- tryCatch(withCallingHandlers(glmer(if(full) form_full else form_null,
+    data=d,family=binomial(link="logit"),nAGQ=agq,control=control),
+    warning=function(w){warnings<<-c(warnings,conditionMessage(w));invokeRestart("muffleWarning")},
+    message=function(m){messages<<-c(messages,conditionMessage(m));invokeRestart("muffleMessage")}),
+    error=function(e){warnings<<-c(warnings,conditionMessage(e));NULL})
+  if(is.null(fit)) return(list(fit=NULL,valid=FALSE,ll=NA_real_,sd=NA_real_,singular=NA,
+    hessian_min=NA_real_,max_gradient=NA_real_,boundary_glm_verified=FALSE,
+    scaled_fixed_score=NA_real_,notes=paste(warnings,collapse=" | ")))
+  oi <- fit@optinfo
+  conv_messages <- oi$conv$lme4$messages
+  serious <- conv_messages[!grepl("boundary.*singular",conv_messages,ignore.case=TRUE)]
+  optimizer_ok <- all(oi$conv$opt==0)
+  hess <- oi$derivs$Hessian
+  he <- if(is.null(hess)) NA_real_ else tryCatch(min(eigen(hess,symmetric=TRUE,only.values=TRUE)$values),error=function(e) NA_real_)
+  grad <- if(is.null(oi$derivs$gradient)) NA_real_ else max(abs(oi$derivs$gradient))
+  ll <- as.numeric(logLik(fit))
+  sd <- as.numeric(getME(fit,"theta")); singular <- isSingular(fit,tol=1e-4)
+  boundary_glm_verified <- FALSE; scaled_fixed_score <- NA_real_
+  # lme4 2.0 may omit derivatives at a legitimate zero-variance boundary.
+  # Verify its fixed-effect score and exact binomial likelihood, instead of
+  # misclassifying a missing random-variance Hessian as optimizer failure.
+  if(singular&&sd<=1e-4&&optimizer_ok&&length(serious)==0&&is.finite(ll)) {
+    boundary_glm_verified <- tryCatch({
+      X <- getME(fit,"X"); mu <- plogis(drop(X%*%fixef(fit)))
+      score <- drop(crossprod(X,d$numerator-d$denominator*mu))
+      information <- crossprod(X,X*as.vector(d$denominator*mu*(1-mu)))
+      scaled_fixed_score <- max(abs(backsolve(chol(information),score,transpose=TRUE)))
+      relative_ll <- sum(dbinom(d$numerator,d$denominator,mu,log=TRUE))-
+        sum(dbinom(d$numerator,d$denominator,d$numerator/d$denominator,log=TRUE))
+      scaled_fixed_score<1e-3&&abs(relative_ll-ll)<1e-3
+    },error=function(e) FALSE)
+  }
+  curvature_ok <- (is.finite(he)&&he>1e-6)||boundary_glm_verified
+  valid <- optimizer_ok&&length(serious)==0&&is.finite(ll)&&all(is.finite(fixef(fit)))&&curvature_ok
+  list(fit=fit,valid=valid,ll=ll,sd=sd,singular=singular,
+       hessian_min=he,max_gradient=grad,boundary_glm_verified=boundary_glm_verified,
+       scaled_fixed_score=scaled_fixed_score,
+       notes=paste(unique(c(warnings,messages,conv_messages)),collapse=" | "))
+}
+fit_pair <- function(d,agq=AGQ) {
+  null <- fit_model(d,FALSE,agq); full <- fit_model(d,TRUE,agq)
+  valid <- null$valid&&full$valid&&full$ll>=null$ll-1e-6
+  list(null=null,full=full,valid=valid,lr=if(valid) max(0,2*(full$ll-null$ll)) else NA_real_)
+}
+true_integral_ll <- function(fit,d) {
+  X <- model.matrix(delete.response(terms(fit,fixed.only=TRUE)),d)
+  eta <- drop(X%*%fixef(fit)); sd <- as.numeric(getME(fit,"theta"))
+  sum(vapply(seq_len(nrow(d)),function(j) {
+    if(sd<1e-8) return(dbinom(d$numerator[j],d$denominator[j],plogis(eta[j]),log=TRUE))
+    log_integrand <- function(z) dbinom(d$numerator[j],d$denominator[j],plogis(eta[j]+sd*z),log=TRUE)+dnorm(z,log=TRUE)
+    opt <- optimize(function(z) -log_integrand(z),interval=c(-12,12))
+    peak <- log_integrand(opt$minimum)
+    val <- integrate(function(z) exp(log_integrand(z)-peak),lower=-Inf,upper=Inf,
+      rel.tol=1e-9,abs.tol=1e-11,subdivisions=300L,stop.on.error=TRUE)$value
+    peak+log(val)
+  },numeric(1)))
+}
+
 stopifnot(is.function(fit_pair),is.function(true_integral_ll))
 save_csv <- function(x,p) write.csv(x,file.path(out,p),row.names=FALSE,na="NA")
 run_one <- function(index) {
@@ -115,7 +191,7 @@ run_one <- function(index) {
   save_csv(base,paste0("tables/result_",panel,"_",subtype,".csv"))
   progress("COMPLETE",base$bootstrap_P,base$status);base
 }
-cluster <- parallel::makePSOCKcluster(as.integer(Sys.getenv("GLMM_WORKERS", "1")),outfile=file.path(out,"qa/worker_console.txt"))
+cluster <- parallel::makePSOCKcluster(as.integer(bootstrap_workers),outfile=file.path(out,"qa/worker_console.txt"))
 parallel::clusterExport(cluster,c("out","B","AGQ","datasets","save_csv","control","form_full","form_null","fit_model","fit_pair","true_integral_ll","run_one"),envir=environment())
 parallel::clusterEvalQ(cluster,{Sys.setenv(OMP_NUM_THREADS="1",OPENBLAS_NUM_THREADS="1",MKL_NUM_THREADS="1");suppressPackageStartupMessages(library(lme4))})
 results <- tryCatch(do.call(rbind,parallel::parLapplyLB(cluster,seq_along(datasets),run_one)),finally=parallel::stopCluster(cluster))
@@ -133,6 +209,6 @@ write_json(list(status="complete",method="binomial GLMM, condition fixed and poo
   primary_P="bootstrap_P",primary_adjusted_P="bootstrap_BH",BH_family=list(Fig3L=6L,FigS9B=8L),
   n_models=nrow(results),n_valid=sum(results$observed_valid),n_primary_P_available=sum(is.finite(results$bootstrap_P)),
   count_MD5=unname(tools::md5sum(file.path(out,"source_data/pool_counts_original.csv"))),
-  source_metadata_SHA256=digest(mdfile,file=TRUE,algo="sha256"),source_helpers_MD5=unname(tools::md5sum(helper)),
+  source_metadata_SHA256=digest(mdfile,file=TRUE,algo="sha256"),source_helpers_MD5=unname(tools::md5sum(script_path)),
   partial_sample_variance_adjustment=NULL,no_method_search=TRUE),file.path(out,"qa/GLMM_complete.json"),auto_unbox=TRUE,pretty=TRUE)
 cat("GLMM_COMPLETE\n");print(results[,c("panel","subtype","bootstrap_P","bootstrap_BH","status")],row.names=FALSE)
