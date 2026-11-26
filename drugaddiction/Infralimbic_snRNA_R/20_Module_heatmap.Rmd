@@ -1,0 +1,415 @@
+---
+title: "Plot expression of the defined gene modules"
+output: html_document
+---
+
+## Packages
+
+```{r packages, error=FALSE}
+library(Matrix)
+library(grid)
+library(ragg)
+```
+
+## Paths
+
+```{r paths, error=FALSE}
+work_dir <- "/path/to/work"
+input_file <- file.path(work_dir, "stage3/01_inputs/Excitatory/IEGhigh_payload.rds")
+figure_dir <- file.path(work_dir, "module_heatmap")
+result_dir <- figure_dir
+```
+
+## Samples and conditions
+
+```{r samples-and-conditions, error=FALSE}
+sample_cols <- c("WD1", "WD2", "WD3", "Ext1", "Ext2", "Ext3", "Ret-Ext1", "Ret-Ext2", "Ret-Ext3")
+metadata <- data.frame(
+  pool_id = sample_cols,
+  source_sample_id = c("Con1", "Con2", "Con3", "Ext1", "Ext2", "Ext3", "Ret_ext1", "Ret_ext2", "Ret_ext3"),
+  model = rep("Rat IL", 9L),
+  condition = factor(rep(c("WD", "Ext", "Ret-Ext"), each = 3L), levels = c("WD", "Ext", "Ret-Ext")),
+  rats_per_pool = rep(5L, 9L), stringsAsFactors = FALSE)
+```
+
+## Parameters and marker definitions
+
+```{r parameters-and-marker-definitions, error=FALSE}
+fixed_module_genes <- data.frame(
+  `gene_order` = c(
+    1L,
+    2L,
+    3L,
+    4L,
+    5L,
+    6L,
+    7L,
+    8L,
+    9L,
+    10L,
+    11L,
+    12L,
+    13L,
+    14L,
+    15L,
+    16L,
+    17L,
+    18L,
+    19L,
+    20L,
+    21L,
+    22L,
+    23L,
+    24L,
+    25L,
+    26L,
+    27L,
+    28L,
+    29L,
+    30L,
+    31L,
+    32L,
+    33L,
+    34L,
+    35L,
+    36L,
+    37L,
+    38L,
+    39L,
+    40L,
+    41L,
+    42L,
+    43L,
+    44L
+  ),
+  `module_id` = c(
+    "M1",
+    "M1",
+    "M1",
+    "M1",
+    "M2",
+    "M2",
+    "M2",
+    "M2",
+    "M3",
+    "M3",
+    "M3",
+    "M3",
+    "M3",
+    "M3",
+    "M3",
+    "M3",
+    "M3",
+    "M3",
+    "M3",
+    "M4",
+    "M4",
+    "M4",
+    "M4",
+    "M4",
+    "M4",
+    "M4",
+    "M5",
+    "M5",
+    "M5",
+    "M5",
+    "M5",
+    "M5",
+    "M5",
+    "M5",
+    "M5",
+    "M6",
+    "M6",
+    "M6",
+    "M6",
+    "M6",
+    "M6",
+    "M6",
+    "M6",
+    "M6"
+  ),
+  `gene` = c(
+    "Ece1",
+    "Kif1a",
+    "Ptprn",
+    "Scg2",
+    "Per1",
+    "Pmepa1",
+    "Kdm6b",
+    "Nr4a3",
+    "Robo1",
+    "Sema5a",
+    "Nrp1",
+    "Efna5",
+    "Ntrk2",
+    "Reln",
+    "Lrrtm3",
+    "Clstn2",
+    "Opcml",
+    "Mdga2",
+    "Cdh2",
+    "Cntnap4",
+    "Braf",
+    "Pde1a",
+    "Pde3b",
+    "Mapk8",
+    "Rims1",
+    "Gnaq",
+    "Mapk1",
+    "Mapk10",
+    "Itpr1",
+    "Gabra5",
+    "Gabrb1",
+    "Grm3",
+    "Grm8",
+    "Grik3",
+    "Grin2b",
+    "Gnai1",
+    "Gng12",
+    "Adora1",
+    "Kcnj6",
+    "Pde4d",
+    "Adcy1",
+    "Adcy3",
+    "Adcy9",
+    "Adcy5"
+  ),
+  stringsAsFactors = FALSE, check.names = FALSE
+)
+heatmap_palette <- data.frame(
+  `position` = c(
+    0.0,
+    0.0166666666666667,
+    0.0333333333333333,
+    0.05,
+    0.0666666666666667,
+    0.0833333333333333,
+    0.1,
+    0.116666666666667,
+    0.133333333333333,
+    0.15,
+    0.166666666666667,
+    0.183333333333333,
+    0.2,
+    0.216666666666667,
+    0.233333333333333,
+    0.25,
+    0.266666666666667,
+    0.283333333333333,
+    0.3,
+    0.316666666666667,
+    0.333333333333333,
+    0.35,
+    0.366666666666667,
+    0.383333333333333,
+    0.4,
+    0.416666666666667,
+    0.433333333333333,
+    0.45,
+    0.466666666666667,
+    0.483333333333333,
+    0.5,
+    0.516666666666667,
+    0.533333333333333,
+    0.55,
+    0.566666666666667,
+    0.583333333333333,
+    0.6,
+    0.616666666666667,
+    0.633333333333333,
+    0.65,
+    0.666666666666667,
+    0.683333333333333,
+    0.7,
+    0.716666666666667,
+    0.733333333333333,
+    0.75,
+    0.766666666666667,
+    0.783333333333333,
+    0.8,
+    0.816666666666667,
+    0.833333333333333,
+    0.85,
+    0.866666666666667,
+    0.883333333333333,
+    0.9,
+    0.916666666666667,
+    0.933333333333333,
+    0.95,
+    0.966666666666667,
+    0.983333333333333,
+    1.0
+  ),
+  `hex` = c(
+    "#4090F4",
+    "#4792F0",
+    "#4D93EC",
+    "#5395E8",
+    "#5997E4",
+    "#6098E0",
+    "#669ADC",
+    "#6D9CD8",
+    "#739DD4",
+    "#7A9FD0",
+    "#80A0CD",
+    "#87A2C8",
+    "#8DA3C4",
+    "#94A5C1",
+    "#9AA7BD",
+    "#A0A8B9",
+    "#A7AAB5",
+    "#ADABB1",
+    "#B4ADAD",
+    "#BAAFA9",
+    "#C0B0A5",
+    "#C7B2A1",
+    "#CDB39D",
+    "#D4B59A",
+    "#DAB796",
+    "#E1B892",
+    "#E7BA8E",
+    "#EEBB8A",
+    "#F4BD86",
+    "#FABE82",
+    "#FEBD7E",
+    "#FDB77A",
+    "#FCB176",
+    "#FBAB72",
+    "#FAA56E",
+    "#F99F6A",
+    "#F89966",
+    "#F89362",
+    "#F78C5E",
+    "#F6865A",
+    "#F58055",
+    "#F47A51",
+    "#F3744D",
+    "#F26E49",
+    "#F16845",
+    "#F06241",
+    "#EF5C3D",
+    "#EE5639",
+    "#ED4F35",
+    "#EC4931",
+    "#EB432D",
+    "#EA3D29",
+    "#E93725",
+    "#E83121",
+    "#E72B1C",
+    "#E62519",
+    "#E51F14",
+    "#E41910",
+    "#E3120C",
+    "#E30D08",
+    "#E20604"
+  ),
+  stringsAsFactors = FALSE, check.names = FALSE
+)
+```
+
+## Analysis and output
+
+```{r analysis-and-output, error=FALSE}
+# Fixed-list expression display. The panel is not a differential-expression test.
+suppressPackageStartupMessages({library(Matrix); library(grid); library(ragg)})
+if (!capabilities("cairo")) stop("Cairo support is required for PDF export.")
+genes <- fixed_module_genes
+palette <- heatmap_palette
+stopifnot(identical(genes$gene_order, seq_len(44L)), !anyDuplicated(genes$gene),
+  identical(as.integer(table(factor(genes$module_id, levels = paste0("M", 1:6)))),
+            c(4L, 4L, 11L, 7L, 9L, 9L)),
+  nrow(palette) == 61L, all(diff(palette$position) > 0))
+p <- readRDS(input_file)
+stopifnot(all(c("normalized", "metadata") %in% names(p)),
+  identical(colnames(p$normalized), as.character(p$metadata$Cell)),
+  all(p$metadata$IEGhigh), all(p$metadata$neuron_type == "Excitatory"),
+  setequal(unique(p$metadata$condition), c("WD", "Ext", "Ret-Ext")))
+if (!all(genes$gene %in% rownames(p$normalized))) {
+  stop("Missing fixed-module genes: ", paste(setdiff(genes$gene, rownames(p$normalized)), collapse = ", "))
+}
+x <- as.matrix(p$normalized[genes$gene, , drop = FALSE])
+stopifnot(all(is.finite(x)), all(x >= 0))
+conditions <- c("Ret-Ext", "Ext", "WD")
+means <- vapply(conditions, function(k)
+  rowMeans(x[, p$metadata$condition == k, drop = FALSE]), numeric(nrow(genes)))
+rownames(means) <- genes$gene
+gene_sd <- apply(means, 1, sd)
+z <- sweep(sweep(means, 1, rowMeans(means), "-"), 1, gene_sd, "/")
+z[!is.finite(gene_sd) | gene_sd == 0, ] <- NA_real_
+mat <- z[, c("Ret-Ext", "Ext"), drop = FALSE]
+
+module_names <- c("Secretory / dense-core vesicle pathway",
+  "Activity-dependent transcriptional response", "Synaptic adhesion / circuit remodeling",
+  "Endocannabinoid-linked neuromodulation", "Drug-evoked Glu/GABA synaptic plasticity",
+  "Addiction-associated cAMP signaling")
+module_colors <- c(M1 = "#F96495", M2 = "#FF8000", M3 = "#C0C000",
+                   M4 = "#55A0FB", M5 = "#05BE78", M6 = "#F94040")
+w <- 15
+h <- w * 266/687
+lims <- c(-1.5, 1.5)
+ramp <- colorRamp(palette$hex, space = "Lab")
+map_color <- function(v) {
+  if (!is.finite(v)) return("#F2F2F2")
+  rgb(ramp((min(lims[2], max(lims[1], v)) - lims[1])/diff(lims)), maxColorValue = 255)
+}
+draw <- function() {
+  grid.newpage()
+  pushViewport(viewport(gp = gpar(fontfamily = "Arial", fontface = "plain", col = "black")))
+  on.exit(popViewport(), add = TRUE)
+  x0 <- 67/687; x1 <- 665/687; cw <- (x1-x0)/44
+  yc <- c("Ret-Ext" = .786, Ext = .696); ch <- .09
+  for (i in seq_len(44L)) for (k in names(yc)) {
+    grid.rect(x0+(i-.5)*cw, yc[k], cw, ch, gp = gpar(fill = map_color(mat[i,k]), col = NA))
+  }
+  grid.rect((x0+x1)/2, mean(yc), x1-x0, 2*ch, gp = gpar(fill = NA, col = "#333333", lwd = 2))
+  for (k in names(yc)) grid.text(k, x0-.012, yc[k], just = "right", gp = gpar(fontsize = 18))
+  for (i in seq_len(44L)) {
+    grid.text(genes$gene[i], x0+(i-.5)*cw, .637, rot = 45, just = c("right","top"),
+              gp = gpar(fontsize = 12))
+    grid.rect(x0+(i-.5)*cw, .888, cw, .04,
+              gp = gpar(fill = module_colors[genes$module_id[i]], col = NA))
+  }
+  grid.roundrect(294/687, .276, 522/687, .372, r = unit(9*w/687, "in"),
+                 gp = gpar(fill = "#E0E0E0", col = "#B0B0B0", lwd = 2))
+  grid.text("Module", 47/687, .276, rot = 90, gp = gpar(fontsize = 18))
+  rows <- 1-c(162.5,191.5,223.5)/266
+  for (j in seq_len(6L)) {
+    x <- if (j <= 3L) 80/687 else 327/687
+    tx <- if (j <= 3L) 95/687 else 343/687
+    y <- rows[(j-1L)%%3L+1L]
+    grid.rect(x, y, unit(17*w/687,"in"), unit(18*w/687,"in"),
+              gp = gpar(fill = module_colors[j], col = "#555555", lwd = 2))
+    grid.text(paste0("M",j,"  ",module_names[j]), tx, y, just = "left", gp = gpar(fontsize = 14))
+  }
+  by <- 1-224/266; bh <- (224-163)/266
+  for (j in seq_len(150L)) {
+    v <- lims[1]+(j-.5)/150*diff(lims)
+    grid.rect(611/687, by+(j-.5)/150*bh, 20/687, bh/150+.0003,
+              gp = gpar(fill = map_color(v), col = NA))
+  }
+  grid.rect(611/687, by+bh/2, 20/687, bh, gp = gpar(fill = NA, col = "#333333", lwd = 2))
+  for (v in c(-1.5, 0, 1.5)) {
+    grid.text(format(v), 628/687, by+(v-lims[1])/diff(lims)*bh, just = "left", gp = gpar(fontsize = 14))
+  }
+  grid.text("Relative Expression", 578/687, by+bh/2, rot = 90, gp = gpar(fontsize = 16))
+}
+out <- figure_dir
+if (dir.exists(out) && length(list.files(out, all.files = TRUE, no.. = TRUE))) {
+  stop("Use an empty output directory.")
+}
+dir.create(out, recursive = TRUE, showWarnings = FALSE)
+write.csv(data.frame(genes, means, check.names = FALSE),
+          file.path(out, "condition_mean_normalized_expression.csv"), row.names = FALSE)
+write.csv(data.frame(genes, z, check.names = FALSE),
+          file.path(out, "gene_standardized_expression.csv"), row.names = FALSE)
+stem <- file.path(out, "module_expression_heatmap")
+cairo_pdf(paste0(stem, ".pdf"), width = w, height = h, family = "Arial", bg = "white")
+draw(); dev.off()
+agg_png(paste0(stem, ".png"), width = w, height = h, units = "in", res = 600, background = "white")
+draw(); dev.off()
+if (requireNamespace("svglite", quietly = TRUE)) {
+  svglite::svglite(paste0(stem, ".svg"), width = w, height = h, bg = "white")
+  draw(); dev.off()
+}
+writeLines(capture.output(sessionInfo()), file.path(out, "sessionInfo.txt"))
+```

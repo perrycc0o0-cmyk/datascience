@@ -1,0 +1,348 @@
+---
+title: "Plot candidate pathway enrichment"
+output: html_document
+---
+
+## Packages
+
+```{r packages, error=FALSE}
+library(grid)
+library(ragg, include.only = character())
+library(svglite, include.only = character())
+library(systemfonts, include.only = character())
+```
+
+## Paths
+
+```{r paths, error=FALSE}
+work_dir <- "/path/to/work"
+input_dir <- file.path(work_dir, "gsea")
+figure_dir <- file.path(work_dir, "gsea_figures")
+result_dir <- figure_dir
+```
+
+## Samples and conditions
+
+```{r samples-and-conditions, error=FALSE}
+sample_cols <- c("WD1", "WD2", "WD3", "Ext1", "Ext2", "Ext3", "Ret-Ext1", "Ret-Ext2", "Ret-Ext3")
+metadata <- data.frame(
+  pool_id = sample_cols,
+  source_sample_id = c("Con1", "Con2", "Con3", "Ext1", "Ext2", "Ext3", "Ret_ext1", "Ret_ext2", "Ret_ext3"),
+  model = rep("Rat IL", 9L),
+  condition = factor(rep(c("WD", "Ext", "Ret-Ext"), each = 3L), levels = c("WD", "Ext", "Ret-Ext")),
+  rats_per_pool = rep(5L, 9L), stringsAsFactors = FALSE)
+```
+
+## Helper functions
+
+```{r helper-functions, error=FALSE}
+# Input checks and native DESeq2 calculations for the expression workflows.
+require_packages <- function(packages) {
+  absent <- packages[!vapply(packages, requireNamespace, logical(1), quietly = TRUE)]
+  if (length(absent)) stop("Install the required R packages: ", paste(absent, collapse = ", "))
+}
+
+limit_threads <- function() {
+  Sys.setenv(OMP_NUM_THREADS = "1", OPENBLAS_NUM_THREADS = "1",
+             MKL_NUM_THREADS = "1", OMP_THREAD_LIMIT = "1")
+  if (requireNamespace("RhpcBLASctl", quietly = TRUE)) {
+    RhpcBLASctl::blas_set_num_threads(1L)
+  }
+}
+
+new_output_dir <- function(path) {
+  if (dir.exists(path) && length(list.files(path, all.files = TRUE, no.. = TRUE))) {
+    stop("Choose an empty output directory: ", path)
+  }
+  dir.create(path, recursive = TRUE, showWarnings = FALSE)
+  normalizePath(path, mustWork = TRUE)
+}
+
+read_table <- function(path) {
+  read.csv(path, stringsAsFactors = FALSE, check.names = FALSE,
+           fileEncoding = "UTF-8-BOM")
+}
+
+write_table <- function(x, path) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  write.csv(x, path, row.names = FALSE, na = "NA", fileEncoding = "UTF-8")
+}
+
+write_session <- function(out) {
+  writeLines(capture.output(sessionInfo()), file.path(out, "session_info.txt"))
+}
+
+pool_ids <- sample_cols
+pool_conditions <- setNames(as.character(metadata$condition), sample_cols)
+
+read_ieg_payload <- function(path, neuronal_class) {
+  require_packages("Matrix")
+  q <- readRDS(path)
+  stopifnot(all(c("counts", "metadata", "gene_annotation") %in% names(q)))
+  x <- q$counts
+  md <- q$metadata
+  ann <- q$gene_annotation
+  stopifnot(inherits(x, "sparseMatrix"),
+            all(c("Cell", "pool_id", "condition", "IEGhigh") %in% names(md)),
+            all(c("seurat_feature", "gene_id", "original_symbol") %in% names(ann)),
+            identical(colnames(x), as.character(md$Cell)),
+            identical(rownames(x), as.character(ann$seurat_feature)),
+            !anyDuplicated(md$Cell), !anyDuplicated(rownames(x)),
+            all(md$IEGhigh), setequal(md$pool_id, pool_ids),
+            identical(as.character(md$condition), unname(pool_conditions[as.character(md$pool_id)])),
+            all(is.finite(x@x)), all(x@x >= 0), all(x@x == round(x@x)))
+  if ("neuron_type" %in% names(md)) stopifnot(all(md$neuron_type == neuronal_class))
+  q
+}
+
+aggregate_pools <- function(q) {
+  group <- Matrix::sparseMatrix(i = seq_len(ncol(q$counts)),
+                               j = match(q$metadata$pool_id, pool_ids),
+                               x = 1, dims = c(ncol(q$counts), length(pool_ids)))
+  counts <- as.matrix(q$counts %*% group)
+  stopifnot(all(is.finite(counts)), all(counts >= 0), all(counts <= .Machine$integer.max))
+  dimnames(counts) <- list(rownames(q$counts), pool_ids)
+  storage.mode(counts) <- "integer"
+  counts
+}
+
+make_pool_metadata <- function(pools, levels) {
+  data.frame(pool_id = pools, condition = factor(unname(pool_conditions[pools]), levels),
+             row.names = pools)
+}
+
+expression_filter <- function(counts, metadata) {
+  unname(edgeR::filterByExpr(edgeR::DGEList(counts, group = metadata$condition),
+                            design = model.matrix(~ condition, metadata)))
+}
+
+fit_native_deseq <- function(counts, metadata, eligible, numerator, denominator,
+                             allow_convergence_retry = FALSE,
+                             contrast = c("condition", numerator, denominator)) {
+  stopifnot(identical(colnames(counts), rownames(metadata)), any(eligible),
+            length(eligible) == nrow(counts), !anyNA(eligible))
+  dds <- DESeq2::DESeqDataSetFromMatrix(counts[eligible, , drop = FALSE],
+                                       metadata, design = ~ condition)
+  dds <- DESeq2::DESeq(dds, test = "Wald", fitType = "parametric", sfType = "ratio",
+                       betaPrior = FALSE, minReplicatesForReplace = 7L,
+                       quiet = TRUE, parallel = FALSE)
+  initial <- S4Vectors::mcols(dds)$betaConv
+  retried <- any(is.na(initial) | !initial)
+  if (retried && allow_convergence_retry) {
+    dds <- DESeq2::nbinomWaldTest(dds, betaPrior = FALSE, maxit = 1000, quiet = TRUE)
+  }
+  stopifnot(all(S4Vectors::mcols(dds)$betaConv),
+            all(DESeq2::counts(dds) == counts[eligible, , drop = FALSE]),
+            !("replaceCounts" %in% SummarizedExperiment::assayNames(dds)))
+  res <- DESeq2::results(dds, contrast = contrast,
+                         alpha = 0.05, independentFiltering = TRUE,
+                         pAdjustMethod = "BH", parallel = FALSE)
+  threshold <- as.numeric(S4Vectors::metadata(res)$filterThreshold)
+  family <- is.finite(res$pvalue) & res$baseMean >= threshold
+  stopifnot(length(threshold) == 1L, is.finite(threshold),
+            identical(unname(is.finite(res$padj)), unname(family)))
+  if (any(family)) {
+    stopifnot(all(abs(res$padj[family] - p.adjust(res$pvalue[family], "BH")) < 1e-12))
+  }
+  list(model = dds, result = res, filter_threshold = threshold,
+       convergence_retry = retried && allow_convergence_retry)
+}
+
+native_de_table <- function(fit, counts, annotation, eligible, neuronal_class,
+                            numerator, denominator) {
+  r <- as.data.frame(fit$result)
+  idx <- match(rownames(counts), rownames(r))
+  mc <- S4Vectors::mcols(fit$model)
+  cooks <- SummarizedExperiment::assays(fit$model)[["cooks"]]
+  max_cooks <- apply(cooks, 1, function(x) if (any(is.finite(x))) max(x[is.finite(x)]) else NA_real_)
+  z <- data.frame(
+    gene = rownames(counts), gene_id = annotation$gene_id,
+    original_symbol = annotation$original_symbol, eligible = eligible,
+    tested = eligible & is.finite(r$pvalue[idx]),
+    in_BH_family = eligible & is.finite(r$padj[idx]),
+    baseMean = r$baseMean[idx], log2FoldChange = r$log2FoldChange[idx],
+    lfcSE = r$lfcSE[idx], stat = r$stat[idx], pvalue = r$pvalue[idx],
+    padj = r$padj[idx], maxCooks = max_cooks[idx], betaConv = mc$betaConv[idx],
+    neuron_type = neuronal_class, numerator = numerator, denominator = denominator,
+    method = "DESeq2", n_pools = ncol(counts), n_per_condition = 3L,
+    independentFiltering = TRUE, alpha = 0.05, stringsAsFactors = FALSE)
+  z$status <- ifelse(!eligible, "filtered_low_expression_before_fit",
+                     ifelse(!z$tested, "native_P_withheld",
+                            ifelse(!z$in_BH_family, "independent_filter_low_mean", "tested_with_native_BH")))
+  z$BH_significant <- z$in_BH_family & z$padj < 0.05
+  z$display_DEG <- z$BH_significant & abs(z$log2FoldChange) >= log2(1.15)
+  z$DE_direction <- ifelse(z$display_DEG, ifelse(z$log2FoldChange > 0, "Up", "Down"),
+                           ifelse(z$in_BH_family, "Not significant", "Not in BH family"))
+  z
+}
+
+# Arial figure export. Fonts are supplied by the operating system.
+load_figure_packages <- function(extra = character()) {
+  require_packages(unique(c("grid", "ragg", "svglite", "systemfonts", extra)))
+  stopifnot(capabilities("cairo"))
+  regular <- systemfonts::match_fonts("Arial")
+  bold <- systemfonts::match_fonts("Arial", weight = "bold")
+  paths <- tolower(basename(c(regular$path, bold$path)))
+  if (length(paths) != 2L || !all(grepl("arial", paths))) {
+    stop("Install Arial Regular and Arial Bold before rendering.")
+  }
+}
+
+export_plot <- function(stem, width, height, draw) {
+  grDevices::cairo_pdf(paste0(stem, ".pdf"), width, height, family = "Arial", bg = "white")
+  tryCatch(draw(), finally = grDevices::dev.off())
+  ragg::agg_png(paste0(stem, ".png"), width, height, units = "in", res = 600, background = "white")
+  tryCatch(draw(), finally = grDevices::dev.off())
+  svglite::svglite(paste0(stem, ".svg"), width, height, bg = "white")
+  tryCatch(draw(), finally = grDevices::dev.off())
+}
+```
+
+## Analysis and output
+
+```{r analysis-and-output, error=FALSE}
+# Render nominal-P-selected candidate pathways; ridge fill represents candidate-family FDR.
+load_figure_packages()
+suppressPackageStartupMessages(library(grid))
+out <- new_output_dir(figure_dir)
+types <- c("Excitatory", "Inhibitory")
+selected <- leading <- list()
+for (type in types) {
+  key <- paste0(type, "__RetExt_vs_Ext")
+  full <- read_table(file.path(input_dir, "tables", paste0(key, "_ALL43_GSEA.csv")))
+  z <- read_table(file.path(input_dir, "tables", paste0(key, "_P005_displayed_GSEA.csv")))
+  finite <- is.finite(full$pvalue)
+  expected <- full[finite & full$pvalue < 0.05, , drop = FALSE]
+  expected <- expected[order(-expected$NES, expected$candidate_order), , drop = FALSE]
+  stopifnot(nrow(full) == 43L, identical(z$ID, expected$ID),
+            isTRUE(all.equal(z, expected, check.attributes = FALSE)),
+            isTRUE(all.equal(full$BH[finite], p.adjust(full$pvalue[finite], "BH"), tolerance = 1e-12)))
+  selected[[type]] <- z
+  leading[[type]] <- read_table(file.path(input_dir, "source_data", paste0(key, "_ALL43_leading_edge_genes.csv")))
+}
+all_selected <- do.call(rbind, selected)
+values <- unlist(lapply(types, function(type) {
+  x <- leading[[type]]
+  x$log2FoldChange[x$ID %in% selected[[type]]$ID]
+}))
+xr <- range(c(0, values[is.finite(values)]))
+pad <- max(0.1, 0.08 * diff(xr))
+xr <- xr + c(-pad, pad)
+logFDR <- -log10(pmax(all_selected$BH, .Machine$double.xmin))
+flim <- c(0, max(0.25, ceiling(max(c(0, logFDR)) / 0.25) * 0.25))
+ne <- max(0.5, ceiling(max(c(0, abs(all_selected$NES))) / 0.5) * 0.5)
+nlim <- c(-ne, ne)
+sizes <- if (nrow(all_selected)) unique(as.numeric(quantile(abs(all_selected$NES), c(0, 0.5, 1)))) else numeric()
+palette_FDR <- colorRampPalette(c("#F3E7CA", "#9B6B21"))(1001)
+palette_NES <- colorRampPalette(c("#588FC0", "#FFFFFF", "#ED7D68"))(1001)
+color <- function(value,limits,palette){
+ stopifnot(is.finite(value),value>=limits[1]-1e-10,value<=limits[2]+1e-10)
+ palette[1L+round(1000*(value-limits[1])/diff(limits))]
+}
+drawridge <- function(z,lead,title,W,H){
+ pushViewport(viewport(xscale=c(0,W),yscale=c(0,H),gp=gpar(fontfamily='Arial',fontface='bold')))
+ on.exit(popViewport(),add=TRUE)
+ U<-function(x)unit(x,'native')
+ line<-function(x,y,...)grid.lines(U(x),U(y),...)
+ txt<-function(label,x,y,...){
+   dots<-list(...);if(is.null(dots$gp))dots$gp<-gpar()
+   dots$gp$fontfamily<-'Arial';dots$gp$font<-2L
+   do.call(grid.text,c(list(label=label,x=U(x),y=U(y)),dots))
+ }
+ grid.rect(gp=gpar(fill='white',col=NA))
+ txt(title,W*.5,H-8,gp=gpar(fontsize=11.5,fontface='bold'))
+ n<-nrow(z)
+ if(!n){
+   txt('No candidate pathway has P < 0.05.',W*.5,H*.5,gp=gpar(fontsize=10))
+   return(invisible(list(density=data.frame(),modes=data.frame())))
+ }
+ L<-81;R<-132;X<-function(v)L+(v-xr[1])/diff(xr)*(R-L)
+ yy<-if(n==1)(H+10)/2 else seq(H-35,33,length.out=n)
+ step<-if(n>1)abs(diff(yy)[1])else min(25,H*.3)
+ density_records<-mode_records<-list()
+ for(i in seq_len(n)){
+   row<-z[i,];d<-lead[lead$ID==row$ID,,drop=FALSE]
+   value<-d$log2FoldChange[is.finite(d$log2FoldChange)]
+   y<-yy[i];fill<-color(-log10(max(row$BH,.Machine$double.xmin)),flim,palette_FDR)
+   label<-paste(strwrap(row$Description,width=38),collapse='\n')
+   txt(label,67,y+.22*step,just='right',gp=gpar(fontsize=9.2))
+   line(c(L,R),c(y,y),gp=gpar(col='black',lwd=1))
+   radius<-2.34*sqrt(abs(row$NES)/ne)
+   grid.circle(U(74),U(y+.22*step),r=unit(radius,'mm'),gp=gpar(fill=color(row$NES,nlim,palette_NES),col=NA))
+   mode<-'none';bandwidth<-NA_real_
+   if(length(unique(value))>=3L){
+     bandwidth<-bw.nrd0(value)
+     den<-density(value,bw=bandwidth,n=512,from=xr[1],to=xr[2])
+     height<-den$y/max(den$y)*step*.67
+     grid.polygon(U(c(X(den$x[1]),X(den$x),X(tail(den$x,1)))),U(c(y,y+height,y)),
+       gp=gpar(fill=fill,col='black',lwd=.8))
+     density_records[[i]]<-data.frame(ID=row$ID,x_log2FC=den$x,density=den$y,bandwidth,
+       display_height_mm=height,NES=row$NES,P=row$pvalue,BH=row$BH,display_order=i)
+     mode<-'density'
+   }else if(length(value)){
+     for(v in unique(value)){
+       line(rep(X(v),2),c(y,y+step*.25),gp=gpar(lwd=1))
+       grid.points(U(X(v)),U(y+step*.27),pch=21,size=unit(1.8,'mm'),gp=gpar(fill=fill,col='black'))
+     }
+     mode<-'rug_less_than3_unique_values'
+   }else{
+     txt('No leading-edge values',mean(c(L,R)),y+step*.2,gp=gpar(fontsize=7))
+     mode<-'no_leading_edge_values'
+   }
+   mode_records[[i]]<-data.frame(ID=row$ID,Description=row$Description,display_order=i,
+     ES=row$ES,NES=row$NES,P=row$pvalue,BH=row$BH,leading_edge_n=length(value),
+     unique_log2FC_n=length(unique(value)),bandwidth,mode,dot_radius_mm=radius)
+ }
+ line(rep(X(0),2),c(26,H-17),gp=gpar(col='#707070',lty=2,lwd=1))
+ line(c(L,R),c(22,22),gp=gpar(lwd=2))
+ ticks<-pretty(xr,4);ticks<-ticks[ticks>=xr[1]&ticks<=xr[2]]
+ for(t in ticks){
+   line(rep(X(t),2),c(22,20),gp=gpar(lwd=2))
+   txt(format(signif(t,3)),X(t),15.5,gp=gpar(fontsize=8.3))
+ }
+ txt(expression('Leading-edge gene log'[2]*'(Fold Change)'),mean(c(L,R)),6.5,gp=gpar(fontsize=9))
+ bar<-function(palette,limits,y1,y2,title,ticks){
+   txt(title,140,y2+6,just='left',gp=gpar(fontsize=9))
+   for(j in 1:100)grid.rect(U(144),U(y1+(j-.5)*(y2-y1)/100),width=unit(2.5,'mm'),
+     height=U((y2-y1)/100+.01),gp=gpar(fill=palette[1+round((j-.5)*1000/100)],col=NA))
+   for(t in ticks)txt(format(signif(t,2)),148,y1+(t-limits[1])/diff(limits)*(y2-y1),
+     just='left',gp=gpar(fontsize=8.3))
+ }
+ pt<-pretty(flim,3)
+ bar(palette_FDR,flim,H*.65,H*.82,'-log10(FDR)',pt[pt>=flim[1]&pt<=flim[2]])
+ bar(palette_NES,nlim,H*.38,H*.55,'NES',c(-ne,0,ne))
+ txt('abs(NES)',140,H*.29,just='left',gp=gpar(fontsize=9))
+ for(i in seq_along(sizes)){
+   y<-H*(.24-.06*(i-1))
+   grid.circle(U(144),U(y),r=unit(2.34*sqrt(sizes[i]/ne),'mm'),gp=gpar(fill='black',col=NA))
+   txt(format(signif(sizes[i],2)),150,y,just='left',gp=gpar(fontsize=8.3))
+ }
+ invisible(list(density=if(length(density_records))do.call(rbind,density_records)else data.frame(),
+   modes=do.call(rbind,mode_records)))
+}
+
+W <- 165.1
+H <- max(180, max(vapply(selected, nrow, integer(1))) * 9.5 + 38)
+gap <- 7
+for (type in types) {
+  stem <- paste0(type, "_RetExt_vs_Ext_candidate_GSEA")
+  draw <- function() {
+    grid.newpage()
+    drawridge(selected[[type]], leading[[type]], paste0(type, " IEGhigh: Ret-Ext vs Ext"), W, H)
+  }
+  export_plot(file.path(out, stem), W / 25.4, H / 25.4, draw)
+}
+draw_combined <- function() {
+  grid.newpage()
+  for (i in seq_along(types)) {
+    type <- types[i]
+    pushViewport(viewport(x = unit((i - 1) * (W + gap), "mm"), y = unit(0, "mm"),
+                          just = c("left", "bottom"), width = unit(W, "mm"), height = unit(H, "mm")))
+    drawridge(selected[[type]], leading[[type]], paste0(type, " IEGhigh: Ret-Ext vs Ext"), W, H)
+    grid.text(LETTERS[i], x = unit(6, "mm"), y = unit(H - 8, "mm"), just = "left",
+              gp = gpar(fontfamily = "Arial", fontface = "bold", fontsize = 13))
+    popViewport()
+  }
+}
+export_plot(file.path(out, "Combined_candidate_GSEA"), (2 * W + gap) / 25.4, H / 25.4, draw_combined)
+```
