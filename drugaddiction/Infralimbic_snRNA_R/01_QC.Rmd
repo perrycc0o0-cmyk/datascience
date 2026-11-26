@@ -5,7 +5,7 @@ output: html_document
 
 Process each library from its raw and filtered 10x matrices. The singlet objects saved here are the input to notebook 02.
 
-Read the matrices, correct ambient RNA, apply the QC cutoffs, identify doublets and save the singlet objects.
+The [per-library workflow](#per-library-workflow) shows how the counts, QC table and saved singlet object pass through the analysis.
 
 ## Packages
 
@@ -312,9 +312,9 @@ save_settings <- function(value, filename) {
 }
 ```
 
-## Analysis setup and functions
+## Runtime settings and output folders
 
-```{r analysis-setup-and-functions, error=FALSE}
+```{r runtime-and-outputs, error=FALSE}
 dir.create(result_dir, recursive = TRUE, showWarnings = FALSE)
 config_snapshot <- save_settings(processing_settings, "processing_settings.json")
 naming_snapshot <- save_settings(sample_naming, "sample_naming.json")
@@ -369,7 +369,11 @@ status <- function(state, sample = NULL, stage = NULL, details = NULL) {
               details = details, pid = Sys.getpid(), config_md5 = cfgmd5, script_md5 = scriptmd5),
          file.path(root, "logs", "01_process_libraries.status.json"))
 }
+```
 
+## Matrix import and QC metrics
+
+```{r matrix-import-and-metrics, error=FALSE}
 read_h5 <- function(path) {
   if (!file.exists(path)) stop("Missing original H5: ", path)
   h <- H5File$new(path, "r"); on.exit(h$close_all())
@@ -403,7 +407,11 @@ qcstats <- function(m, mt_ids, ribo_ids) {
              row.names = colnames(m))
 }
 prefixed <- function(x, suffix) { names(x) <- paste0(names(x), suffix); x }
+```
 
+## Per-library QC figures
+
+```{r qc-figures, error=FALSE}
 plot_qc <- function(q, sample, outdir) {
   dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
   th <- theme_classic(base_size = 12, base_family = cfg$runtime$font_family) +
@@ -434,7 +442,11 @@ plot_qc <- function(q, sample, outdir) {
     labs(title = paste(sample, "fixed QC and doublet calls"), x = "Original UMIs", y = "Original detected genes", colour = NULL) + th
   export(p, "E_QC_doublet_calls")
 }
+```
 
+## Select the libraries to process
+
+```{r select-libraries, error=FALSE}
 samples <- cfg$samples
 requested <- selected_samples
 if (!is.null(requested)) {
@@ -446,10 +458,38 @@ stopifnot(length(samples) > 0L)
 mt_ids <- flat(cfg$qc$mitochondrial_gene_ids); mt_symbols <- flat(cfg$qc$mitochondrial_symbols)
 ```
 
-## Per-library ambient correction and QC
+## Per-library workflow
 
-```{r per-library-ambient-correction-and-qc, error=FALSE}
-run_one <- function(s) {
+The functions below keep the count matrices, QC table and output files separate. QC flags are based on the original counts; doublet detection uses corrected counts for the nuclei that passed QC.
+
+```{r per-library-workflow, error=FALSE}
+process_library <- function(sample_record) {
+  lib <- prepare_library(sample_record)
+  if (is.null(lib)) return(invisible(NULL))
+
+  input <- read_library_counts(lib)
+  ambient <- correct_ambient_rna(lib, input)
+  qc <- apply_fixed_qc(lib, input, ambient)
+  doublets <- classify_doublets(lib, input, ambient, qc$table)
+  final_qc <- finalize_qc(lib, input, qc$table, doublets)
+
+  save_singlet_object(lib, input, ambient, final_qc)
+  write_library_summary(lib, input, ambient, final_qc, doublets, qc$fail_columns)
+  rm(input, ambient)
+  gc(FALSE)
+}
+```
+
+## Identify the library and its checkpoints
+
+```{r library-input-paths, error=FALSE}
+check_checkpoint_identity <- function(checkpoint, identity) {
+  stopifnot(identical(checkpoint$config_md5, identity$config_md5),
+            identical(checkpoint$script_md5, identity$script_md5),
+            identical(checkpoint$input_md5, identity$input_md5))
+}
+
+prepare_library <- function(s) {
   sample <- s$sample_id
   seed <- as.integer(cfg$analysis_seed + match(sample, vapply(cfg$samples, `[[`, "", "sample_id")))
   ad <- file.path(root, "01_ambient", sample); qd <- file.path(root, "02_qc_doublet", sample)
@@ -460,13 +500,10 @@ run_one <- function(s) {
   info_before <- file.info(c(fp, rp))[, c("size", "mtime"), drop = FALSE]
   input_md5 <- as.list(tools::md5sum(c(fp, rp)))
   identity <- list(config_md5 = cfgmd5, script_md5 = scriptmd5, input_md5 = input_md5)
-  check_identity <- function(x) {
-    stopifnot(identical(x$config_md5, cfgmd5), identical(x$script_md5, scriptmd5), identical(x$input_md5, input_md5))
-  }
   done <- file.path(qd, "complete.json")
   if (file.exists(done)) {
-    if (!resume) stop("Completed sample exists; explicit --resume is required: ", sample)
-    d <- read_json(done); check_identity(d)
+    if (!resume) stop("Completed sample exists; set resume <- TRUE to reuse it: ", sample)
+    check_checkpoint_identity(read_json(done), identity)
     stopifnot(file.exists(file.path(qd, "singlet_clean.rds")))
     logmsg(sample, "same-identity completed checkpoint retained"); return(invisible(NULL))
   }
@@ -474,10 +511,23 @@ run_one <- function(s) {
     input_kind = c("filtered_called", "raw_droplets"), path = c(fp, rp), bytes = info_before$size,
     mtime_UTC = format(info_before$mtime, tz = "UTC", usetz = TRUE), md5 = unlist(input_md5, use.names = FALSE))
   write.csv(manifest, file.path(qd, "input_manifest.csv"), row.names = FALSE)
-  set.seed(seed); status("running", sample, "read_original"); logmsg(sample, "reading original filtered H5")
+  list(sample = sample, condition = s$condition_label, seed = seed,
+       filtered_path = fp, raw_path = rp, ambient_dir = ad, qc_dir = qd,
+       input_info = info_before, identity = identity, completion_path = done)
+}
+```
 
-  # 1. Read the filtered counts for this library.
-  obs <- read_h5(fp); n0 <- ncol(obs$counts)
+## Read the filtered matrix and measure original QC metrics
+
+```{r original-counts-and-eligibility, error=FALSE}
+read_library_counts <- function(lib) {
+  sample <- lib$sample
+  set.seed(lib$seed)
+  status("running", sample, "read_original")
+  logmsg(sample, "reading original filtered H5")
+
+  obs <- read_h5(lib$filtered_path)
+  n0 <- ncol(obs$counts)
   stopifnot(all(mt_ids %in% obs$ids), setequal(obs$ids[obs$symbols %in% mt_symbols], mt_ids))
   symbols <- obs$symbols; empty <- is.na(symbols) | !nzchar(symbols); symbols[empty] <- obs$ids[empty]
   featuremap <- data.frame(gene_id = obs$ids, original_symbol = obs$symbols,
@@ -496,75 +546,130 @@ run_one <- function(s) {
   featuremap$passes_initial_min_cells <- featuremap$gene_id %in% eligible_genes
   featuremap$n_detecting_called_barcodes <- as.numeric(Matrix::rowSums(obs$counts > 0))
   featuremap$n_detecting_initial_cells <- as.numeric(Matrix::rowSums(obs$counts[, eligible_cells, drop = FALSE] > 0))
-  write.csv(featuremap, file.path(ad, "feature_mapping.csv"), row.names = FALSE)
+  write.csv(featuremap, file.path(lib$ambient_dir, "feature_mapping.csv"), row.names = FALSE)
   mt_eligible <- intersect(mt_ids, eligible_genes)
   if (!length(mt_eligible)) stop("No reference mitochondrial genes survive initial qualification")
   write.csv(featuremap[match(mt_ids, featuremap$gene_id), , drop = FALSE],
-            file.path(qd, "mitochondrial_gene_scope_audit.csv"), row.names = FALSE)
+            file.path(lib$qc_dir, "mitochondrial_gene_scope_audit.csv"), row.names = FALSE)
   rawstats <- qcstats(obs$counts[eligible_genes, , drop = FALSE], mt_ids, ribo_ids)
   stopifnot(all(rawstats[eligible_cells, "nCount"] == initial$nCount_RNA),
             all(rawstats[eligible_cells, "nFeature"] == initial$nFeature_RNA))
   rm(initial); gc(FALSE)
+  list(observed = obs, n_called = n0, features = featuremap, ribo_ids = ribo_ids,
+       metrics_all_genes = full_raw, metrics_eligible_genes = rawstats,
+       eligible_genes = eligible_genes, eligible_cells = eligible_cells,
+       eligible_mt_ids = mt_eligible)
+}
+```
 
-  ambdone <- file.path(ad, "complete.json"); acpath <- file.path(ad, "corrected_counts_gene_id.rds")
+## Estimate and remove ambient RNA with SoupX
+
+The filtered matrix supplies the called barcodes and the raw matrix supplies the droplets used to estimate ambient RNA.
+
+```{r soupx-preclusters, error=FALSE}
+make_soupx_clusters <- function(lib, input) {
+  sample <- lib$sample
+  obs <- input$observed
+  full_raw <- input$metrics_all_genes
+
+  status("running", sample, "SoupX_precluster")
+  use <- full_raw$nFeature >= cfg$ambient$precluster_genes_min &
+    full_raw$nCount >= cfg$ambient$precluster_umi_min
+  stopifnot(sum(use) > 1000L)
+  pre <- CreateSeuratObject(obs$counts[, use, drop = FALSE], min.cells = 0,
+                            min.features = 0, project = sample)
+  pre <- NormalizeData(pre, verbose = FALSE)
+  pre <- FindVariableFeatures(pre, nfeatures = as.integer(cfg$ambient$precluster_n_hvg), verbose = FALSE)
+  VariableFeatures(pre) <- setdiff(VariableFeatures(pre), mt_ids)
+  pre <- ScaleData(pre, features = VariableFeatures(pre), verbose = FALSE)
+  pre <- RunPCA(pre, npcs = as.integer(cfg$ambient$precluster_n_pcs),
+                features = VariableFeatures(pre), seed.use = lib$seed, verbose = FALSE)
+  pre <- FindNeighbors(pre, dims = seq_len(cfg$ambient$precluster_neighbor_dims), verbose = FALSE)
+  pre <- FindClusters(pre, resolution = cfg$ambient$precluster_resolution,
+                      algorithm = 1, random.seed = lib$seed, verbose = FALSE)
+  cl <- setNames(rep("low_quality", input$n_called), colnames(obs$counts))
+  cl[colnames(pre)] <- as.character(Idents(pre))
+  write.csv(data.frame(barcode = names(cl), SoupX_precluster = unname(cl)),
+            file.path(lib$ambient_dir, "preliminary_clusters.csv"), row.names = FALSE)
+  rm(pre); gc(FALSE)
+  cl
+}
+```
+
+```{r soupx-correction, error=FALSE}
+correct_ambient_rna <- function(lib, input) {
+  sample <- lib$sample
+  ad <- lib$ambient_dir
+  obs <- input$observed
+  identity <- lib$identity
+  ambdone <- file.path(ad, "complete.json")
+  acpath <- file.path(ad, "corrected_counts_gene_id.rds")
+
   if (file.exists(ambdone)) {
-    if (!resume) stop("Ambient checkpoint exists; explicit --resume is required: ", sample)
-    am <- read_json(ambdone); check_identity(am)
-    corrected <- readRDS(acpath); rho <- am$estimated_rho
+    if (!resume) stop("Ambient checkpoint exists; set resume <- TRUE to reuse it: ", sample)
+    am <- read_json(ambdone)
+    check_checkpoint_identity(am, identity)
+    corrected <- readRDS(acpath)
     stopifnot(identical(dimnames(corrected), dimnames(obs$counts)))
-  } else {
-
-    # 2. Estimate ambient RNA from the raw droplets and correct counts.
-    status("running", sample, "SoupX_precluster")
-    use <- full_raw$nFeature >= cfg$ambient$precluster_genes_min & full_raw$nCount >= cfg$ambient$precluster_umi_min
-    stopifnot(sum(use) > 1000L)
-    pre <- CreateSeuratObject(obs$counts[, use, drop = FALSE], min.cells = 0, min.features = 0, project = sample)
-    pre <- NormalizeData(pre, verbose = FALSE)
-    pre <- FindVariableFeatures(pre, nfeatures = as.integer(cfg$ambient$precluster_n_hvg), verbose = FALSE)
-    VariableFeatures(pre) <- setdiff(VariableFeatures(pre), mt_ids)
-    pre <- ScaleData(pre, features = VariableFeatures(pre), verbose = FALSE)
-    pre <- RunPCA(pre, npcs = as.integer(cfg$ambient$precluster_n_pcs), features = VariableFeatures(pre), seed.use = seed, verbose = FALSE)
-    pre <- FindNeighbors(pre, dims = seq_len(cfg$ambient$precluster_neighbor_dims), verbose = FALSE)
-    pre <- FindClusters(pre, resolution = cfg$ambient$precluster_resolution, algorithm = 1, random.seed = seed, verbose = FALSE)
-    cl <- setNames(rep("low_quality", n0), colnames(obs$counts)); cl[colnames(pre)] <- as.character(Idents(pre))
-    write.csv(data.frame(barcode = names(cl), SoupX_precluster = unname(cl)), file.path(ad, "preliminary_clusters.csv"), row.names = FALSE)
-    rm(pre); gc(FALSE)
-    status("running", sample, "SoupX_autoEstCont"); logmsg(sample, "fresh raw-droplet SoupX estimation")
-    raw <- read_h5(rp)
-    stopifnot(identical(raw$ids, obs$ids), identical(raw$symbols, obs$symbols), all(colnames(obs$counts) %in% colnames(raw$counts)))
-    sc <- SoupChannel(tod = raw$counts, toc = obs$counts); sc <- setClusters(sc, cl)
-    rm(raw); gc(FALSE)
-    sc <- autoEstCont(sc, doPlot = FALSE, forceAccept = FALSE, verbose = TRUE)
-    rho <- unique(sc$metaData$rho)
-    stopifnot(length(rho) == 1L, is.finite(rho), rho > 0)
-    writej(c(identity, list(sample_id = sample, estimated_rho = rho, updated_UTC = now())), file.path(ad, "rho_estimate.json"))
-    if (rho > cfg$ambient$rho_review_max) stop("SoupX rho exceeds review boundary; inspect before accepting: ", rho)
-    write.csv(sc$soupProfile, file.path(ad, "soup_profile.csv"), row.names = TRUE)
-    if (!is.null(sc$fit)) atomic_rds(sc$fit, file.path(ad, "autoEstCont_fit.rds"))
-    status("running", sample, "SoupX_adjustCounts"); set.seed(seed)
-    corrected <- adjustCounts(sc, roundToInt = TRUE, verbose = 1)
-    stopifnot(identical(dimnames(corrected), dimnames(obs$counts)), all(is.finite(corrected@x)),
-      all(corrected@x >= 0), all(corrected@x == round(corrected@x)))
-    atomic_rds(corrected, acpath)
-    write.csv(data.frame(featuremap, observed_UMI = as.numeric(Matrix::rowSums(obs$counts)),
-      corrected_UMI = as.numeric(Matrix::rowSums(corrected)),
-      removed_UMI = as.numeric(Matrix::rowSums(obs$counts) - Matrix::rowSums(corrected))),
-      file.path(ad, "gene_UMI_correction.csv"), row.names = FALSE)
-    writej(c(identity, list(status = "complete", sample_id = sample, estimated_rho = rho,
-      method = "SoupX", version = as.character(packageVersion("SoupX")), completed_UTC = now())), ambdone)
-    rm(sc); gc(FALSE)
+    return(list(counts = corrected, rho = am$estimated_rho))
   }
 
-  # 3. Apply the fixed QC cutoffs to the original library metrics.
+  cl <- make_soupx_clusters(lib, input)
+  status("running", sample, "SoupX_autoEstCont")
+  logmsg(sample, "fresh raw-droplet SoupX estimation")
+  raw <- read_h5(lib$raw_path)
+  stopifnot(identical(raw$ids, obs$ids), identical(raw$symbols, obs$symbols),
+            all(colnames(obs$counts) %in% colnames(raw$counts)))
+  sc <- SoupChannel(tod = raw$counts, toc = obs$counts)
+  sc <- setClusters(sc, cl)
+  rm(raw); gc(FALSE)
+  sc <- autoEstCont(sc, doPlot = FALSE, forceAccept = FALSE, verbose = TRUE)
+  rho <- unique(sc$metaData$rho)
+  stopifnot(length(rho) == 1L, is.finite(rho), rho > 0)
+  writej(c(identity, list(sample_id = sample, estimated_rho = rho, updated_UTC = now())),
+         file.path(ad, "rho_estimate.json"))
+  if (rho > cfg$ambient$rho_review_max) stop("SoupX rho exceeds review boundary; inspect before accepting: ", rho)
+  write.csv(sc$soupProfile, file.path(ad, "soup_profile.csv"), row.names = TRUE)
+  if (!is.null(sc$fit)) atomic_rds(sc$fit, file.path(ad, "autoEstCont_fit.rds"))
+
+  status("running", sample, "SoupX_adjustCounts")
+  set.seed(lib$seed)
+  corrected <- adjustCounts(sc, roundToInt = TRUE, verbose = 1)
+  stopifnot(identical(dimnames(corrected), dimnames(obs$counts)), all(is.finite(corrected@x)),
+            all(corrected@x >= 0), all(corrected@x == round(corrected@x)))
+  atomic_rds(corrected, acpath)
+  write.csv(data.frame(input$features, observed_UMI = as.numeric(Matrix::rowSums(obs$counts)),
+    corrected_UMI = as.numeric(Matrix::rowSums(corrected)),
+    removed_UMI = as.numeric(Matrix::rowSums(obs$counts) - Matrix::rowSums(corrected))),
+    file.path(ad, "gene_UMI_correction.csv"), row.names = FALSE)
+  writej(c(identity, list(status = "complete", sample_id = sample, estimated_rho = rho,
+    method = "SoupX", version = as.character(packageVersion("SoupX")), completed_UTC = now())), ambdone)
+  rm(sc); gc(FALSE)
+  list(counts = corrected, rho = rho)
+}
+```
+
+## Apply the fixed QC cutoffs
+
+```{r fixed-qc-cutoffs, error=FALSE}
+apply_fixed_qc <- function(lib, input, ambient) {
+  sample <- lib$sample
+  qd <- lib$qc_dir
+  corrected <- ambient$counts
+  eligible_genes <- input$eligible_genes
+  eligible_cells <- input$eligible_cells
+  mt_eligible <- input$eligible_mt_ids
+  barcodes <- colnames(input$observed$counts)
+
   status("running", sample, "observed_fixed_QC")
-  cs <- qcstats(corrected[eligible_genes, , drop = FALSE], mt_ids, ribo_ids)
-  full_corrected <- qcstats(corrected, mt_ids, ribo_ids)
-  qc <- data.frame(cell_id = paste(sample, colnames(obs$counts), sep = "__"), sample_id = sample,
-    condition_label = s$condition_label, barcode_10x = colnames(obs$counts),
-    passes_initial_eligibility = colnames(obs$counts) %in% eligible_cells,
-    prefixed(rawstats, "_observed"), prefixed(cs, "_corrected"),
-    prefixed(full_raw, "_fullGEX_observed"), prefixed(full_corrected, "_fullGEX_corrected"),
-    estimated_SoupX_rho = rho, row.names = NULL)
+  cs <- qcstats(corrected[eligible_genes, , drop = FALSE], mt_ids, input$ribo_ids)
+  full_corrected <- qcstats(corrected, mt_ids, input$ribo_ids)
+  qc <- data.frame(cell_id = paste(sample, barcodes, sep = "__"), sample_id = sample,
+    condition_label = lib$condition, barcode_10x = barcodes,
+    passes_initial_eligibility = barcodes %in% eligible_cells,
+    prefixed(input$metrics_eligible_genes, "_observed"), prefixed(cs, "_corrected"),
+    prefixed(input$metrics_all_genes, "_fullGEX_observed"), prefixed(full_corrected, "_fullGEX_corrected"),
+    estimated_SoupX_rho = ambient$rho, row.names = NULL)
   qc$removed_UMI <- qc$nCount_observed - qc$nCount_corrected
   qc$removed_UMI_fraction <- ifelse(qc$nCount_observed > 0, qc$removed_UMI / qc$nCount_observed, NA_real_)
   qc$fail_nonfinite_metric <- !is.finite(qc$nFeature_observed) | !is.finite(qc$nCount_observed) |
@@ -588,46 +693,74 @@ run_one <- function(s) {
     n_reference_mt_genes = length(mt_ids), n_initial_mt_genes = length(mt_eligible),
     mt_ids_not_initial_qualified = setdiff(mt_ids, mt_eligible), no_MAD_filter = TRUE,
     no_corrected_metric_filter = TRUE), file.path(qd, "applied_thresholds.json"))
-  dp <- file.path(qd, "doublet_calls.rds")
-  if (file.exists(dp)) {
-    if (!resume) stop("Doublet checkpoint exists; explicit --resume is required: ", sample)
-    dc <- readRDS(dp); check_identity(dc)
-    stopifnot(identical(dc$barcodes, qc$barcode_10x[qc$passes_core_QC]))
-  } else {
+  list(table = qc, fail_columns = fail_cols)
+}
+```
 
-    # 4. Classify doublets among QC-passing nuclei.
-    status("running", sample, "scDblFinder"); logmsg(sample, "scDblFinder on", sum(qc$passes_core_QC), "fixed-QC nuclei")
-    sce <- SingleCellExperiment(assays = list(counts = corrected[eligible_genes, qc$passes_core_QC, drop = FALSE]))
-    expected_dbr <- cfg$doublet$dbr_per_1000 * n0 / 1000
-    stopifnot(expected_dbr > 0, expected_dbr < .2)
-    set.seed(seed)
-    sce <- scDblFinder(sce, clusters = FALSE, dbr = expected_dbr, dbr.per1k = cfg$doublet$dbr_per_1000,
-      BPPARAM = BiocParallel::SerialParam(), verbose = TRUE)
-    stopifnot(identical(colnames(sce), qc$barcode_10x[qc$passes_core_QC]))
-    dc <- c(identity, list(barcodes = colnames(sce), score = as.numeric(sce$scDblFinder.score),
-      class = as.character(sce$scDblFinder.class), expected_dbr = expected_dbr,
-      original_called_denominator = n0, BPPARAM = "SerialParam", seed = seed,
-      xgboost_global_config = xgboost::xgb.get.config(), completed_UTC = now()))
-    stopifnot(all(is.finite(dc$score)), all(dc$class %in% c("singlet", "doublet")))
-    atomic_rds(dc, dp); rm(sce); gc(FALSE)
+## Call doublets and complete the QC table
+
+```{r doublet-classification, error=FALSE}
+classify_doublets <- function(lib, input, ambient, qc) {
+  sample <- lib$sample
+  seed <- lib$seed
+  n0 <- input$n_called
+  dp <- file.path(lib$qc_dir, "doublet_calls.rds")
+  if (file.exists(dp)) {
+    if (!resume) stop("Doublet checkpoint exists; set resume <- TRUE to reuse it: ", sample)
+    dc <- readRDS(dp)
+    check_checkpoint_identity(dc, lib$identity)
+    stopifnot(identical(dc$barcodes, qc$barcode_10x[qc$passes_core_QC]))
+    return(dc)
   }
+
+  status("running", sample, "scDblFinder")
+  logmsg(sample, "scDblFinder on", sum(qc$passes_core_QC), "fixed-QC nuclei")
+  sce <- SingleCellExperiment(assays = list(
+    counts = ambient$counts[input$eligible_genes, qc$passes_core_QC, drop = FALSE]))
+  expected_dbr <- cfg$doublet$dbr_per_1000 * n0 / 1000
+  stopifnot(expected_dbr > 0, expected_dbr < .2)
+  set.seed(seed)
+  sce <- scDblFinder(sce, clusters = FALSE, dbr = expected_dbr, dbr.per1k = cfg$doublet$dbr_per_1000,
+    BPPARAM = BiocParallel::SerialParam(), verbose = TRUE)
+  stopifnot(identical(colnames(sce), qc$barcode_10x[qc$passes_core_QC]))
+  dc <- c(lib$identity, list(barcodes = colnames(sce), score = as.numeric(sce$scDblFinder.score),
+    class = as.character(sce$scDblFinder.class), expected_dbr = expected_dbr,
+    original_called_denominator = n0, BPPARAM = "SerialParam", seed = seed,
+    xgboost_global_config = xgboost::xgb.get.config(), completed_UTC = now()))
+  stopifnot(all(is.finite(dc$score)), all(dc$class %in% c("singlet", "doublet")))
+  atomic_rds(dc, dp)
+  rm(sce); gc(FALSE)
+  dc
+}
+
+finalize_qc <- function(lib, input, qc, dc) {
+  qd <- lib$qc_dir
   qc$scDblFinder_score[qc$passes_core_QC] <- dc$score
   qc$scDblFinder_class[qc$passes_core_QC] <- dc$class
   qc$passes_QC <- qc$passes_core_QC & !is.na(qc$scDblFinder_class) & qc$scDblFinder_class == "singlet"
   qc$final_call <- ifelse(!qc$passes_core_QC, "QC_failed", qc$scDblFinder_class)
   stopifnot(!anyNA(qc$passes_QC), sum(qc$passes_QC) > 0L,
-    sum(!qc$passes_core_QC) + sum(dc$class == "doublet") + sum(qc$passes_QC) == n0)
+    sum(!qc$passes_core_QC) + sum(dc$class == "doublet") + sum(qc$passes_QC) == input$n_called)
   qc$percent.mt <- qc$percent_mt_observed
   qc$percent.ribo <- qc$percent_ribo_observed
   qc$log10GenesPerUMI <- qc$log10GenesPerUMI_observed
   writegz(qc, file.path(qd, "all_called_barcodes_QC.csv.gz"))
-  plot_qc(qc, sample, file.path(qd, "QC_after"))
+  plot_qc(qc, lib$sample, file.path(qd, "QC_after"))
+  qc
+}
+```
 
-  # 5. Save the singlet object and per-library summaries.
+## Save the singlet object and library summary
+
+```{r singlet-object-and-summary, error=FALSE}
+save_singlet_object <- function(lib, input, ambient, qc) {
+  sample <- lib$sample
+  eligible_genes <- input$eligible_genes
+  featuremap <- input$features
   status("running", sample, "save_singlets")
   keep <- which(qc$passes_QC)
-  cor <- Matrix::drop0(corrected[eligible_genes, keep, drop = FALSE])
-  rawkeep <- Matrix::drop0(obs$counts[eligible_genes, keep, drop = FALSE])
+  cor <- Matrix::drop0(ambient$counts[eligible_genes, keep, drop = FALSE])
+  rawkeep <- Matrix::drop0(input$observed$counts[eligible_genes, keep, drop = FALSE])
   fmap <- featuremap[match(eligible_genes, featuremap$gene_id), , drop = FALSE]
   dimnames(cor) <- list(fmap$seurat_feature, qc$cell_id[keep]); dimnames(rawkeep) <- dimnames(cor)
   meta <- qc[keep, , drop = FALSE]; rownames(meta) <- meta$cell_id
@@ -638,31 +771,38 @@ run_one <- function(s) {
   obj[["RNA"]]@meta.data <- fmap; obj[["observed"]]@meta.data <- fmap
   stopifnot(isTRUE(validObject(obj)), identical(rownames(obj[["RNA"]]), fmap$seurat_feature),
     identical(rownames(obj[["RNA"]]), rownames(obj[["observed"]])), identical(colnames(obj), rownames(obj[[]])))
-  obj@misc$processing <- c(identity, list(sample_id = sample, seed = seed, original_H5 = c(fp, rp),
+  obj@misc$processing <- c(lib$identity, list(sample_id = sample, seed = lib$seed,
+    original_H5 = c(lib$filtered_path, lib$raw_path),
     primary_assay = cfg$output_interface$primary_assay, audit_assay = cfg$output_interface$audit_assay,
     QC_metric_gene_scope = cfg$qc$metric_gene_scope, QC_metric_assay = cfg$qc$metric_assay,
     initial_min_cells = cfg$initial_eligibility$min_cells_per_gene,
     initial_min_features = cfg$initial_eligibility$min_features_per_cell,
     no_old_embeddings_or_labels = TRUE, no_normalization_or_integration_yet = TRUE))
-  atomic_rds(obj, file.path(qd, "singlet_clean.rds"))
-  summary <- data.frame(sample_id = sample, condition_label = s$condition_label, CellRanger_called = n0,
-    initial_eligible_cells = length(eligible_cells), initial_eligible_genes = length(eligible_genes),
-    initial_ineligible_cells = sum(!qc$passes_initial_eligibility), SoupX_rho = rho,
+  atomic_rds(obj, file.path(lib$qc_dir, "singlet_clean.rds"))
+}
+
+write_library_summary <- function(lib, input, ambient, qc, dc, fail_cols) {
+  sample <- lib$sample
+  qd <- lib$qc_dir
+  summary <- data.frame(sample_id = sample, condition_label = lib$condition, CellRanger_called = input$n_called,
+    initial_eligible_cells = length(input$eligible_cells), initial_eligible_genes = length(input$eligible_genes),
+    initial_ineligible_cells = sum(!qc$passes_initial_eligibility), SoupX_rho = ambient$rho,
     min_genes_exclusive = cfg$qc$nFeature_lower_exclusive, max_genes_exclusive = cfg$qc$nFeature_upper_exclusive,
     min_UMI_exclusive = cfg$qc$nCount_lower_exclusive, max_UMI_exclusive = cfg$qc$nCount_upper_exclusive,
     max_observed_mt_exclusive = cfg$qc$percent_mt_upper_exclusive,
     min_observed_complexity_exclusive = cfg$qc$log10GenesPerUMI_lower_exclusive,
     core_QC_failed = sum(!qc$passes_core_QC), core_QC_passed = sum(qc$passes_core_QC),
     scDblFinder_doublets = sum(dc$class == "doublet"), final_singlets = sum(qc$passes_QC),
-    expected_dbr = dc$expected_dbr, n_reference_mt_genes = length(mt_ids), n_initial_mt_genes = length(mt_eligible))
+    expected_dbr = dc$expected_dbr, n_reference_mt_genes = length(mt_ids),
+    n_initial_mt_genes = length(input$eligible_mt_ids))
   for (nm in fail_cols) summary[[paste0(nm, "_nonexclusive")]] <- sum(qc[[nm]])
   write.csv(summary, file.path(qd, "sample_summary.csv"), row.names = FALSE)
   writeLines(capture.output(sessionInfo()), file.path(qd, "sessionInfo.txt"))
-  stopifnot(identical(info_before, file.info(c(fp, rp))[, c("size", "mtime"), drop = FALSE]))
-  writej(c(identity, list(status = "complete", sample_id = sample, completed_UTC = now(), summary = summary,
-    no_old_embeddings_or_labels = TRUE, no_old_results_overwritten = TRUE)), done)
+  stopifnot(identical(lib$input_info,
+    file.info(c(lib$filtered_path, lib$raw_path))[, c("size", "mtime"), drop = FALSE]))
+  writej(c(lib$identity, list(status = "complete", sample_id = sample, completed_UTC = now(), summary = summary,
+    no_old_embeddings_or_labels = TRUE, no_old_results_overwritten = TRUE)), lib$completion_path)
   logmsg(sample, "COMPLETE:", sum(qc$passes_QC), "singlets;", sum(dc$class == "doublet"), "predicted doublets")
-  rm(obj, obs, corrected, cor, rawkeep); gc(FALSE)
 }
 ```
 
@@ -671,7 +811,7 @@ run_one <- function(s) {
 ```{r process-the-selected-libraries-and-save-outputs, error=FALSE}
 tryCatch({
   status("running", stage = "original_libraries")
-  for (s in samples) run_one(s)
+  for (s in samples) process_library(s)
   tabs <- lapply(cfg$samples, function(s) {
     p <- file.path(root, "02_qc_doublet", s$sample_id, "sample_summary.csv")
     if (file.exists(p)) read.csv(p, check.names = FALSE) else NULL
