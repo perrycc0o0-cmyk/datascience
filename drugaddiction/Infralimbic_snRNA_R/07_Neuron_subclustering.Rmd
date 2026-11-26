@@ -3,6 +3,8 @@ title: "Recluster excitatory and inhibitory nuclei"
 output: html_document
 ---
 
+Start from the six-class Seurat object from notebook 04. Rebuild separate embeddings and clusters for excitatory and inhibitory nuclei, then save the lineage objects for annotation.
+
 ## Packages
 
 ```{r packages, error=FALSE}
@@ -229,6 +231,8 @@ run_stage2_recluster <- function(root, config = file.path(root, "config", "stage
     cat(s2_now(), if (is.null(lineage)) "ALL" else lineage, stage, "\n"); flush.console()
   }
   tryCatch({
+
+    # 1. Load the six-class object and verify its counts and metadata.
     update("loading_approved_global_object_once")
     input <- normalizePath(cfg$input_rds, mustWork = TRUE)
     parent_complete <- file.path(cfg$parent_stage1_root, "05_six_class_review", "assignment_complete.json")
@@ -270,6 +274,8 @@ run_stage2_recluster <- function(root, config = file.path(root, "config", "stage
       lineage_path <- file.path(root, spec$output_directory)
       for (z in c(lineage_path, file.path(lineage_path, "source_data"), file.path(lineage_path, "checkpoints")))
         dir.create(z, recursive = TRUE, showWarnings = FALSE)
+
+      # 2. Subset the lineage and build a fresh Seurat object.
       update("extracting_approved_lineage_counts", id)
       cells <- colnames(parent)[as.character(parent_md[[cfg$source_class_column]]) == spec$source_class]
       if (length(cells) != as.integer(spec$expected_nuclei)) stop("Approved lineage cell count mismatch: ", id)
@@ -302,11 +308,15 @@ run_stage2_recluster <- function(root, config = file.path(root, "config", "stage
       s2_write_gz_csv(input_audit, file.path(lineage_path, "source_data", "input_cells_audit.csv.gz"))
       write.csv(as.data.frame(table(sample_id = factor(md$sample_id, levels = expected_samples))),
         file.path(lineage_path, "source_data", "input_nuclei_by_sample.csv"), row.names = FALSE)
+
+      # 3. Normalize counts and select 2,000 variable genes.
       update("fresh_normalization_and_2000_HVG", id)
       obj <- Seurat::NormalizeData(obj, assay = "RNA", normalization.method = "LogNormalize", scale.factor = 10000, verbose = FALSE)
       obj <- Seurat::FindVariableFeatures(obj, assay = "RNA", selection.method = "vst", nfeatures = 2000, verbose = FALSE)
       hvg <- SeuratObject::VariableFeatures(obj, assay = "RNA")
       if (length(hvg) != 2000L) stop("Expected exactly 2000 subset HVGs")
+
+      # 4. Scale expression and run PCA.
       update("scale_without_regression_and_PCA100", id)
       obj <- Seurat::ScaleData(obj, assay = "RNA", features = hvg, vars.to.regress = NULL,
         block.size = 500, verbose = TRUE)
@@ -316,6 +326,8 @@ run_stage2_recluster <- function(root, config = file.path(root, "config", "stage
       pc <- SeuratObject::Embeddings(obj[["pca"]])
       if (ncol(pc) < 30L || !identical(rownames(pc), cells) || any(!is.finite(pc))) stop("Invalid fresh PCA")
       harmony_dims <- seq_len(min(30L, ncol(pc)))
+
+      # 5. Integrate by sample with Harmony.
       update("sample_only_Harmony_first30_PCs", id)
       obj <- harmony::RunHarmony(obj, group.by.vars = "sample_id", reduction.use = "pca",
         dims.use = harmony_dims, reduction.save = "harmony.sample", project.dim = FALSE,
@@ -325,6 +337,8 @@ run_stage2_recluster <- function(root, config = file.path(root, "config", "stage
         stop("Invalid Harmony embedding; no PCA fallback")
       graph_dims <- seq_len(min(19L, ncol(h)))
       if (length(graph_dims) != 19L) stop("Nineteen Harmony dimensions are required")
+
+      # 6. Build the neighbor graph and assign clusters.
       update("neighbors_and_resolution_point5", id)
       graph_prefix <- tolower(id)
       graphs <- paste0(graph_prefix, c("_nn", "_snn"))
@@ -335,6 +349,8 @@ run_stage2_recluster <- function(root, config = file.path(root, "config", "stage
       obj$subcluster <- factor(as.character(obj$subcluster), levels = s2_levels(obj$subcluster))
       obj$seurat_clusters <- obj$subcluster
       SeuratObject::Idents(obj) <- "subcluster"
+
+      # 7. Fit UMAP for this lineage.
       update("fresh_lineage_UMAP", id)
       umap_args <- list(n_neighbors = as.integer(spec$umap_n_neighbors), n_components = 2L, metric = "cosine",
         min_dist = spec$umap_min_dist, spread = spec$umap_spread, set_op_mix_ratio = 1,
@@ -369,6 +385,8 @@ run_stage2_recluster <- function(root, config = file.path(root, "config", "stage
       write.csv(as.data.frame(table(subcluster = obj$subcluster)),
         file.path(lineage_path, "source_data", "cluster_counts.csv"), row.names = FALSE)
       write.csv(obj[["RNA"]][[]], file.path(lineage_path, "source_data", "gene_feature_map.csv"), row.names = FALSE)
+
+      # 8. Find cluster markers for subtype annotation.
       update("annotation_marker_discovery_not_condition_DE", id)
       set.seed(seed)
       markers <- Seurat::FindAllMarkers(obj, assay = "RNA", slot = "data", test.use = "wilcox",
@@ -393,6 +411,8 @@ run_stage2_recluster <- function(root, config = file.path(root, "config", "stage
         source_counts_and_metadata_unchanged = TRUE, subtype_annotation_started = FALSE, downstream_started = FALSE)
       obj@misc$manuscript_stage2 <- pars
       s2_json(pars, file.path(lineage_path, "source_data", "parameters.json"))
+
+      # 9. Save the lineage Seurat object and audit tables.
       update("saving_atomic_lineage_object_without_compression", id)
       s2_atomic_rds(obj, file.path(lineage_path, "neuron_reclustered.rds"))
       writeLines(capture.output(utils::sessionInfo()), file.path(lineage_path, "sessionInfo.txt"))

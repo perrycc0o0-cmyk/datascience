@@ -3,6 +3,8 @@ title: "Check neuronal analysis requirements"
 output: html_document
 ---
 
+Optional diagnostics for neuronal subclustering. The toy matrix in the compatibility test contains no study data. No downstream notebook reads the diagnostic report.
+
 ## Packages
 
 ```{r packages, error=FALSE}
@@ -152,37 +154,11 @@ missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
 if (length(missing)) stop("Missing packages: ", paste(missing, collapse = ", "))
 if (!file.exists(cfg$input_rds) || !file.exists(file.path(cfg$parent_stage1_root, "05_six_class_review", "assignment_complete.json")))
   stop("Completed approved input is missing")
-s2_now <- function() format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
-s2_json <- function(value, path) jsonlite::write_json(value, path, pretty = TRUE,
-  auto_unbox = TRUE, null = "null", na = "null", dataframe = "rows", digits = 16)
-s2_atomic_rds <- function(value, path) {
-  if (file.exists(path)) stop("Refusing to overwrite: ", path)
-  tmp <- tempfile(".incomplete-", tmpdir = dirname(path))
-  saveRDS(value, tmp, compress = FALSE)
-  if (!file.rename(tmp, path)) stop("Atomic rename failed; temporary object retained: ", tmp)
-}
+```
 
-s2_json <- function(value, path) jsonlite::write_json(value, path, pretty = TRUE,
-  auto_unbox = TRUE, null = "null", na = "null", dataframe = "rows", digits = 16)
-s2_atomic_rds <- function(value, path) {
-  if (file.exists(path)) stop("Refusing to overwrite: ", path)
-  tmp <- tempfile(".incomplete-", tmpdir = dirname(path))
-  saveRDS(value, tmp, compress = FALSE)
-  if (!file.rename(tmp, path)) stop("Atomic rename failed; temporary object retained: ", tmp)
-}
+## Test sparse counts and gene identifier transfer
 
-s2_atomic_rds <- function(value, path) {
-  if (file.exists(path)) stop("Refusing to overwrite: ", path)
-  tmp <- tempfile(".incomplete-", tmpdir = dirname(path))
-  saveRDS(value, tmp, compress = FALSE)
-  if (!file.rename(tmp, path)) stop("Atomic rename failed; temporary object retained: ", tmp)
-}
-
-s2_levels <- function(value) {
-  ids <- unique(as.character(value)); nums <- suppressWarnings(as.numeric(ids))
-  ids[order(is.na(nums), nums, ids)]
-}
-
+```{r test-sparse-counts-and-gene-identifier-transfer, error=FALSE}
 s2_counts <- function(obj, assay) {
   a <- obj[[assay]]
   if (is.null(a)) stop("Missing assay: ", assay)
@@ -205,11 +181,6 @@ s2_copy_feature_metadata <- function(from, to) {
   SeuratObject::AddMetaData(to, metadata = fm)
 }
 
-s2_write_gz_csv <- function(tab, path) {
-  con <- gzfile(path, "wt"); on.exit(close(con))
-  write.csv(tab, con, row.names = FALSE)
-}
-
 x <- Matrix::sparseMatrix(i = c(1, 2, 3, 1, 2, 3), j = c(1, 1, 2, 3, 4, 4), x = c(2, 3, 4, 5, 1, 2),
   dims = c(3, 4), dimnames = list(c("GeneA", "GeneB", "GeneC"), paste0("WD1__test", 1:4)))
 assay <- SeuratObject::CreateAssay5Object(counts = x, min.cells = 0, min.features = 0)
@@ -218,12 +189,22 @@ assay <- SeuratObject::AddMetaData(assay, metadata = fm)
 fresh <- SeuratObject::CreateSeuratObject(counts = SeuratObject::CreateAssay5Object(counts = x, min.cells = 0, min.features = 0))
 fresh[["RNA"]] <- s2_copy_feature_metadata(assay, fresh[["RNA"]])
 stopifnot(identical(s2_counts(fresh, "RNA"), x), identical(as.character(fresh[["RNA"]][[]]$gene_id), fm$gene_id))
+```
+
+## Verify the Seurat defaults
+
+```{r verify-the-seurat-defaults, error=FALSE}
 umap_default <- get("RunUMAP.default", envir = asNamespace("Seurat"))
 ff <- formals(umap_default)
 expected <- list(n.neighbors = 30L, min.dist = .3, spread = 1, repulsion.strength = 1, metric = "cosine")
 observed <- lapply(names(expected), function(nm) eval(ff[[nm]])); names(observed) <- names(expected)
 for (nm in names(expected)) if (!isTRUE(all.equal(observed[[nm]], expected[[nm]], check.attributes = FALSE)))
   stop("Inhibitory Seurat default mismatch: ", nm)
+```
+
+## Check R code syntax
+
+```{r check-r-code-syntax, error=FALSE}
 local({
   notebook_lines <- readLines(script_path, warn = FALSE, encoding = "UTF-8")
   starts <- which(startsWith(notebook_lines, "```{r "))
@@ -233,6 +214,11 @@ local({
   code <- unlist(Map(function(a, b) notebook_lines[seq.int(a + 1L, b - 1L)], starts, ends), use.names = FALSE)
   invisible(parse(text = code, encoding = "UTF-8"))
 })
+```
+
+## Check Arial and export the diagnostic report
+
+```{r check-arial-and-export-the-diagnostic-report, error=FALSE}
 if (!is.null(cfg$runtime$fontconfig_file)) Sys.setenv(FONTCONFIG_FILE = cfg$runtime$fontconfig_file)
 font <- system2("fc-match", c("-f", shQuote("%{family}\t%{file}"), "Arial"), stdout = TRUE)
 if (!length(font) || !grepl("Arial", font[1L])) stop("Arial font unavailable")

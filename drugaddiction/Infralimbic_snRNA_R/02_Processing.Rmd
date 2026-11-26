@@ -3,6 +3,10 @@ title: "Integrate libraries and cluster major cell types"
 output: html_document
 ---
 
+Use the singlet objects from notebook 01 to fit the global embedding and clusters. Save the Seurat review object and marker evidence for cell type assignment.
+
+Read the libraries, merge and normalize counts, run PCA and sample-only Harmony, then cluster, compute UMAP and export marker summaries.
+
 ## Packages
 
 ```{r packages, error=FALSE}
@@ -501,6 +505,8 @@ run_stage1_global <- function(root, config = file.path(root, "config", "processi
   update <- function(stage) { status$stage <<- stage; status$updated <<- stage1_now(); stage1_write_json(status, status_path) }
   update("input_validation")
   tryCatch({
+
+    # 1. Load the completed singlet objects and validate their sample labels.
     samples <- cfg$samples
     if (is.null(samples) || length(samples) != 9L) stop("Exactly nine sample records are required.")
     sample_ids <- vapply(samples, `[[`, "", "sample_id")
@@ -589,6 +595,8 @@ run_stage1_global <- function(root, config = file.path(root, "config", "processi
         stop("A feature maps to different gene IDs across libraries.")
     }
     fmap <- fmap[!duplicated(fmap$seurat_feature), , drop = FALSE]
+
+    # 2. Merge the libraries, normalize the counts and select variable genes.
     update("merge_normalize_hvg")
     obj <- merge(objs[[1L]], y = objs[-1L], merge.data = FALSE, merge.dr = FALSE,
                  project = "manuscript_global_stage1")
@@ -606,6 +614,8 @@ run_stage1_global <- function(root, config = file.path(root, "config", "processi
     obj <- Seurat::FindVariableFeatures(obj, assay = "RNA", selection.method = "vst", nfeatures = 2000, verbose = FALSE)
     hvg <- SeuratObject::VariableFeatures(obj, assay = "RNA")
     if (length(hvg) != 2000L) stop("Expected exactly 2,000 selected HVGs.")
+
+    # 3. Scale expression and run PCA.
     update("scale_regress_and_pca")
     obj <- Seurat::ScaleData(obj, assay = "RNA", features = hvg,
       vars.to.regress = c("nCount_RNA", "percent.mt"), block.size = 500, verbose = TRUE)
@@ -613,6 +623,8 @@ run_stage1_global <- function(root, config = file.path(root, "config", "processi
       seed.use = seed, reduction.name = "pca", reduction.key = "PC_", verbose = TRUE)
     pcs <- stage1_select_pcs(SeuratObject::Stdev(obj[["pca"]]), 30L)
     dims <- seq_len(pcs$npcs)
+
+    # 4. Integrate by sample with Harmony.
     update("sample_only_harmony")
     obj <- harmony::RunHarmony(obj, group.by.vars = "sample_id", reduction.use = "pca",
       dims.use = dims, reduction.save = "harmony.sample", project.dim = FALSE,
@@ -620,6 +632,8 @@ run_stage1_global <- function(root, config = file.path(root, "config", "processi
     h <- SeuratObject::Embeddings(obj[["harmony.sample"]])
     if (!identical(rownames(h), colnames(obj)) || ncol(h) != length(dims) || any(!is.finite(h)))
       stop("Invalid Harmony output; no PCA fallback.")
+
+    # 5. Build the shared-neighbor graph, cluster and compute UMAP.
     update("graph_clusters_and_umap")
     obj <- Seurat::FindNeighbors(obj, reduction = "harmony.sample", dims = dims, k.param = 20,
       graph.name = c("global_nn", "global_snn"), verbose = TRUE)
@@ -653,6 +667,8 @@ run_stage1_global <- function(root, config = file.path(root, "config", "processi
     if (!identical(rownames(xy), colnames(obj)) || any(!is.finite(xy))) stop("Invalid fresh UMAP.")
     stage1_atomic_rds(list(pca = obj[["pca"]], harmony = obj[["harmony.sample"]],
       umap = obj[["umap.global"]], graphs = obj@graphs), file.path(out, "checkpoints", "fresh_latent_and_graphs.rds"))
+
+    # 6. Summarize cell type markers by cluster.
     update("canonical_marker_evidence")
     panels <- stage1_panel(); genes <- unique(c(unlist(panels, use.names = FALSE), stage1_review_genes()))
     available <- intersect(genes, rownames(obj[["RNA"]]))
@@ -712,6 +728,8 @@ run_stage1_global <- function(root, config = file.path(root, "config", "processi
       package_versions = stats::setNames(lapply(required, function(p) as.character(utils::packageVersion(p))), required),
       seed = seed, threads = threads, BLAS_threads = 1L)
     stage1_write_json(obj@misc$manuscript_stage1, file.path(out, "source_data", "global_parameters.json"))
+
+    # 7. Save the global Seurat object and review outputs.
     update("saving_global_review_object")
     final <- file.path(out, "global_celltype_review.rds")
     stage1_atomic_rds(obj, final)

@@ -3,6 +3,10 @@ title: "Correct ambient RNA, filter nuclei and remove doublets"
 output: html_document
 ---
 
+Process each library from its raw and filtered 10x matrices. The singlet objects saved here are the input to notebook 02.
+
+Read the matrices, correct ambient RNA, apply the QC cutoffs, identify doublets and save the singlet objects.
+
 ## Packages
 
 ```{r packages, error=FALSE}
@@ -471,6 +475,8 @@ run_one <- function(s) {
     mtime_UTC = format(info_before$mtime, tz = "UTC", usetz = TRUE), md5 = unlist(input_md5, use.names = FALSE))
   write.csv(manifest, file.path(qd, "input_manifest.csv"), row.names = FALSE)
   set.seed(seed); status("running", sample, "read_original"); logmsg(sample, "reading original filtered H5")
+
+  # 1. Read the filtered counts for this library.
   obs <- read_h5(fp); n0 <- ncol(obs$counts)
   stopifnot(all(mt_ids %in% obs$ids), setequal(obs$ids[obs$symbols %in% mt_symbols], mt_ids))
   symbols <- obs$symbols; empty <- is.na(symbols) | !nzchar(symbols); symbols[empty] <- obs$ids[empty]
@@ -507,6 +513,8 @@ run_one <- function(s) {
     corrected <- readRDS(acpath); rho <- am$estimated_rho
     stopifnot(identical(dimnames(corrected), dimnames(obs$counts)))
   } else {
+
+    # 2. Estimate ambient RNA from the raw droplets and correct counts.
     status("running", sample, "SoupX_precluster")
     use <- full_raw$nFeature >= cfg$ambient$precluster_genes_min & full_raw$nCount >= cfg$ambient$precluster_umi_min
     stopifnot(sum(use) > 1000L)
@@ -546,6 +554,8 @@ run_one <- function(s) {
       method = "SoupX", version = as.character(packageVersion("SoupX")), completed_UTC = now())), ambdone)
     rm(sc); gc(FALSE)
   }
+
+  # 3. Apply the fixed QC cutoffs to the original library metrics.
   status("running", sample, "observed_fixed_QC")
   cs <- qcstats(corrected[eligible_genes, , drop = FALSE], mt_ids, ribo_ids)
   full_corrected <- qcstats(corrected, mt_ids, ribo_ids)
@@ -584,6 +594,8 @@ run_one <- function(s) {
     dc <- readRDS(dp); check_identity(dc)
     stopifnot(identical(dc$barcodes, qc$barcode_10x[qc$passes_core_QC]))
   } else {
+
+    # 4. Classify doublets among QC-passing nuclei.
     status("running", sample, "scDblFinder"); logmsg(sample, "scDblFinder on", sum(qc$passes_core_QC), "fixed-QC nuclei")
     sce <- SingleCellExperiment(assays = list(counts = corrected[eligible_genes, qc$passes_core_QC, drop = FALSE]))
     expected_dbr <- cfg$doublet$dbr_per_1000 * n0 / 1000
@@ -610,6 +622,8 @@ run_one <- function(s) {
   qc$log10GenesPerUMI <- qc$log10GenesPerUMI_observed
   writegz(qc, file.path(qd, "all_called_barcodes_QC.csv.gz"))
   plot_qc(qc, sample, file.path(qd, "QC_after"))
+
+  # 5. Save the singlet object and per-library summaries.
   status("running", sample, "save_singlets")
   keep <- which(qc$passes_QC)
   cor <- Matrix::drop0(corrected[eligible_genes, keep, drop = FALSE])

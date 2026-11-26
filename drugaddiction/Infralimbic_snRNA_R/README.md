@@ -10,13 +10,15 @@ Set `input_dir` to the directory containing one folder per library. Each library
 
 | Notebooks | Steps and outputs |
 | --- | --- |
-| [00](00_Preflight.Rmd), [01](01_QC.Rmd) | Check the inputs, correct ambient RNA, filter nuclei and save per-library singlet objects under `stage1/`. |
+| [01](01_QC.Rmd) | Correct ambient RNA, filter nuclei and save per-library singlet objects under `stage1/`. |
 | [02](02_Processing.Rmd), [03](03_Global_marker_review.Rmd), [04](04_Major_cell_annotation.Rmd), [05](05_Major_cell_review.Rmd) | Integrate and cluster, review markers, assign the six major cell types and plot the annotations. The six-class object is `stage1/05_six_class_review/global_celltype_six_class.rds`. |
-| [06](06_Neuron_preflight.Rmd), [07](07_Neuron_subclustering.Rmd), [08](08_Neuron_annotation.Rmd), [09](09_Neuron_marker_review.Rmd), [10](10_Final_neuron_annotation.Rmd) | Use the six-class object to recluster excitatory and inhibitory nuclei, review the subtype markers and apply the accepted inhibitory mapping. |
+| [07](07_Neuron_subclustering.Rmd), [08](08_Neuron_annotation.Rmd), [09](09_Neuron_marker_review.Rmd), [10](10_Final_neuron_annotation.Rmd) | Use the six-class object to recluster excitatory and inhibitory nuclei, review the subtype markers and apply the accepted inhibitory mapping. |
 | [11](11_IEG_high_inputs.Rmd) | Write `stage3/01_inputs/neuron_metadata.csv`, both class-specific `IEGhigh_payload.rds` files, `pseudobulk_inputs.rds` and the count and pool metadata tables. |
 | [12](12_Major_cell_figures.Rmd), [13](13_Composition_figures.Rmd) | Render the annotated UMAP and marker panels (Fig. 3B/C and Fig. S7D) and composition panels (Fig. 3D/K and Fig. S9A). |
 
 Review the broad-class and neuronal subtype markers before proceeding to downstream analysis. Use a new output directory for a new run. In notebook 01, leave `selected_samples` as `NULL` to process all libraries, or provide a character vector to select libraries. To resume an interrupted run, use the same notebook, paths and settings as when it started; checkpoints from the earlier `.R` layout retain the original script checksum.
+
+Optional diagnostics: use the [library check](checks/00_Preflight.Rmd) before notebook 01 to check matrices, packages and fonts, or the [neuronal check](checks/06_Neuron_preflight.Rmd) before notebook 07 to check the saved input and Seurat environment. Set their paths as in the analysis notebooks. These diagnostic reports are not required by the analysis.
 
 ### Downstream analysis and figures
 

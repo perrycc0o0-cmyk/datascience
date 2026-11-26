@@ -3,6 +3,8 @@ title: "Test differential expression by pooled sample"
 output: html_document
 ---
 
+Aggregate IEG-high nuclei by pool within each neuronal class. Fit DESeq2 separately for each pairwise comparison and save all-gene and filtered result tables.
+
 ## Packages
 
 ```{r packages, error=FALSE}
@@ -189,6 +191,11 @@ types <- c("Excitatory", "Inhibitory")
 pairs <- list(RetExt_vs_Ext = c("Ret-Ext", "Ext"),
               Ext_vs_WD = c("Ext", "WD"), RetExt_vs_WD = c("Ret-Ext", "WD"))
 summary_rows <- list()
+```
+
+## Aggregate pools and fit the contrasts
+
+```{r aggregate-pools-and-fit-the-contrasts, error=FALSE}
 for (i in seq_along(types)) {
   type <- types[i]
   q <- read_ieg_payload(payload_files[i], type)
@@ -229,6 +236,11 @@ for (i in seq_along(types)) {
       same_model_convergence_retry = fit$convergence_retry)
   }
 }
+```
+
+## Save the comparison summary
+
+```{r save-the-comparison-summary, error=FALSE}
 write_table(do.call(rbind, summary_rows), file.path(out, "DESeq2_pairwise_summary.csv"))
 write_session(out)
 ```
